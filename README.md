@@ -34,5 +34,5 @@ Stelle sicher, dass du ein **Java Development Kit (JDK 17 oder neuer)** installi
 
 ### 1. Repository klonen
 ```bash
-git clone [https://github.com/j4yac3/Simple-Passwortmanager.git](https://github.com/j4yac3/Simple-Passwortmanager.git)
+git clone https://github.com/j4yac3/Simple-Passwortmanager.git](https://github.com/j4yac3/Simple-Passwortmanager.git)
 cd Simple-Passwortmanager
