@@ -123,6 +123,14 @@ public class Main extends Application {
 
     @Override
     public void start(Stage primaryStage) {
+        try {
+            startImpl(primaryStage);
+        } catch (Throwable t) {
+            ErrorLog.showFatal("Oberflaeche", t);
+        }
+    }
+
+    private void startImpl(Stage primaryStage) {
         this.primaryStage = primaryStage;
         initDatabase();
         I18n.setLanguage(getConfig("language"));
