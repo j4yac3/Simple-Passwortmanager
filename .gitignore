@@ -46,3 +46,7 @@ dist/
 *.zip
 *.jar
 !**/src/main/**/target/*.jar
+dependency-reduced-pom.xml
+
+# Alte fertige App-Builds nicht im Repository
+JM Passwortmanager V.*
