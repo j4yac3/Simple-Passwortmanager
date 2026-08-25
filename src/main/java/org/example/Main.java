@@ -210,7 +210,7 @@ public class Main extends Application {
         passConfirm.setOnAction(e -> submitBtn.fire());
 
         root.getChildren().addAll(passInput, passConfirm, submitBtn);
-        primaryStage.setScene(new Scene(root, 1280, 720));
+        primaryStage.setScene(new Scene((StackPane) root.getUserData(), 1280, 720));
         primaryStage.show();
         primaryStage.centerOnScreen();
         currentAuthRedraw = this::showSetupScreen;
@@ -267,7 +267,7 @@ public class Main extends Application {
         forgotBtn.setOnAction(e -> showRecoveryScreen());
 
         root.getChildren().addAll(passInput, stayLoggedInBox, loginBtn, forgotBtn);
-        primaryStage.setScene(new Scene(root, 1280, 720));
+        primaryStage.setScene(new Scene((StackPane) root.getUserData(), 1280, 720));
         primaryStage.show();
         primaryStage.centerOnScreen();
         currentAuthRedraw = this::showLoginScreen;
@@ -304,7 +304,7 @@ public class Main extends Application {
         backBtn.setOnAction(e -> showLoginScreen());
 
         root.getChildren().addAll(codeInput, newPassInput, resetBtn, backBtn);
-        primaryStage.setScene(new Scene(root, 1280, 720));
+        primaryStage.setScene(new Scene((StackPane) root.getUserData(), 1280, 720));
         currentAuthRedraw = this::showRecoveryScreen;
     }
 
@@ -345,7 +345,7 @@ public class Main extends Application {
         proceedBtn.setOnAction(e -> onComplete.run());
 
         root.getChildren().addAll(codeLabel, copyBtn, proceedBtn);
-        primaryStage.setScene(new Scene(root, 1280, 720));
+        primaryStage.setScene(new Scene((StackPane) root.getUserData(), 1280, 720));
         currentAuthRedraw = () -> showRecoveryCodeScreen(code, onComplete);
     }
 
@@ -817,6 +817,8 @@ public class Main extends Application {
         applyTheme();
 
         Scene mainScene = new Scene(mainLayout, 1280, 720);
+        String scrollbarCss = isDarkMode ? "/scrollbar.css" : "/scrollbar-light.css";
+        mainScene.getStylesheets().add(getClass().getResource(scrollbarCss).toExternalForm());
         mainScene.addEventFilter(MouseEvent.ANY, e -> lastActivityMillis = System.currentTimeMillis());
         mainScene.addEventFilter(KeyEvent.ANY, e -> lastActivityMillis = System.currentTimeMillis());
         primaryStage.setScene(mainScene);
@@ -826,6 +828,12 @@ public class Main extends Application {
     }
 
     private void applyTheme() {
+        Scene scene = primaryStage != null ? primaryStage.getScene() : null;
+        if (scene != null) {
+            scene.getStylesheets().clear();
+            String scrollbarCss = isDarkMode ? "/scrollbar.css" : "/scrollbar-light.css";
+            scene.getStylesheets().add(getClass().getResource(scrollbarCss).toExternalForm());
+        }
         if (isDarkMode) {
             mainLayout.setStyle("-fx-background-color: #09090b;");
             sidebar.setStyle("-fx-background-color: #121214; -fx-border-color: #27272a; -fx-border-width: 0 1px 0 0;");
@@ -1018,21 +1026,17 @@ public class Main extends Application {
     }
 
     private VBox createAuthLayout(String title, String subtitle) {
-        VBox root = new VBox(20);
-        root.setAlignment(Pos.CENTER);
-        root.setStyle("-fx-background-color: #09090b;");
+        VBox center = new VBox(20);
+        center.setAlignment(Pos.CENTER);
+        center.setStyle("-fx-background-color: #09090b;");
 
-        HBox langBar = new HBox();
-        langBar.setMaxWidth(Double.MAX_VALUE);
-        langBar.setPadding(new Insets(18, 24, 0, 24));
         Button authLangBtn = new Button(I18n.isEnglish() ? "🌐 Deutsch" : "🌐 English");
         authLangBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: #71717a; -fx-cursor: hand; -fx-font-size: 13px; -fx-padding: 6 12; -fx-background-radius: 50em; -fx-border-color: #27272a; -fx-border-radius: 50em;");
         authLangBtn.setOnMouseEntered(e -> authLangBtn.setStyle("-fx-background-color: #18181b; -fx-text-fill: #ffffff; -fx-cursor: hand; -fx-font-size: 13px; -fx-padding: 6 12; -fx-background-radius: 50em; -fx-border-color: #3f3f46; -fx-border-radius: 50em;"));
         authLangBtn.setOnMouseExited(e -> authLangBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: #71717a; -fx-cursor: hand; -fx-font-size: 13px; -fx-padding: 6 12; -fx-background-radius: 50em; -fx-border-color: #27272a; -fx-border-radius: 50em;"));
         authLangBtn.setOnAction(e -> toggleLanguage());
-        Region langSpacer = new Region();
-        HBox.setHgrow(langSpacer, Priority.ALWAYS);
-        langBar.getChildren().addAll(langSpacer, authLangBtn);
+        StackPane.setAlignment(authLangBtn, Pos.TOP_RIGHT);
+        StackPane.setMargin(authLangBtn, new Insets(18, 24, 0, 0));
 
         Label icon = new Label("🔒");
         icon.setStyle("-fx-font-size: 48px;");
@@ -1043,8 +1047,12 @@ public class Main extends Application {
         Label subLabel = new Label(subtitle);
         subLabel.setStyle("-fx-text-fill: #a1a1aa; -fx-font-size: 14px; -fx-text-alignment: center;");
 
-        root.getChildren().addAll(langBar, icon, titleLabel, subLabel);
-        return root;
+        center.getChildren().addAll(icon, titleLabel, subLabel);
+
+        StackPane root = new StackPane(center, authLangBtn);
+        root.setStyle("-fx-background-color: #09090b;");
+        center.setUserData(root);
+        return center;
     }
 
     private void styleAuthField(TextField field) {

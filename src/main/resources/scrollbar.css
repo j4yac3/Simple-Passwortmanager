@@ -1,0 +1,83 @@
+/* Custom scrollbar styling for dark theme */
+
+/* ScrollPane background */
+.scroll-pane {
+    -fx-background-color: transparent;
+    -fx-background: transparent;
+}
+
+.scroll-pane > .viewport {
+    -fx-background-color: transparent;
+}
+
+/* Scrollbar track */
+.scroll-bar {
+    -fx-background-color: transparent;
+    -fx-background-radius: 10px;
+}
+
+.scroll-bar .track {
+    -fx-background-color: transparent;
+    -fx-background-radius: 10px;
+    -fx-border-color: transparent;
+}
+
+.scroll-bar .track-background {
+    -fx-background-color: transparent;
+    -fx-background-radius: 10px;
+}
+
+/* Scrollbar thumb */
+.scroll-bar .thumb {
+    -fx-background-color: #3f3f46;
+    -fx-background-radius: 10px;
+    -fx-background-insets: 2;
+}
+
+.scroll-bar .thumb:hover {
+    -fx-background-color: #52525b;
+}
+
+.scroll-bar .thumb:pressed {
+    -fx-background-color: #71717a;
+}
+
+/* Hide increment/decrement arrows */
+.scroll-bar .increment-button,
+.scroll-bar .decrement-button {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+    -fx-pref-width: 0;
+    -fx-pref-height: 0;
+    -fx-min-width: 0;
+    -fx-min-height: 0;
+    -fx-max-width: 0;
+    -fx-max-height: 0;
+}
+
+.scroll-bar .increment-arrow,
+.scroll-bar .decrement-arrow {
+    -fx-shape: "";
+    -fx-padding: 0;
+    -fx-pref-width: 0;
+    -fx-pref-height: 0;
+}
+
+/* Vertical scrollbar width */
+.scroll-bar:vertical {
+    -fx-pref-width: 8px;
+    -fx-min-width: 8px;
+    -fx-max-width: 8px;
+}
+
+/* Horizontal scrollbar height */
+.scroll-bar:horizontal {
+    -fx-pref-height: 8px;
+    -fx-min-height: 8px;
+    -fx-max-height: 8px;
+}
+
+/* Corner between scrollbars */
+.scroll-pane .corner {
+    -fx-background-color: transparent;
+}
