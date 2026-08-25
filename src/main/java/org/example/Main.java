@@ -134,6 +134,7 @@ public class Main extends Application {
         this.primaryStage = primaryStage;
         initDatabase();
         I18n.setLanguage(getConfig("language"));
+        startWakeServer(this.primaryStage);
 
         try {
             InputStream iconStream = getClass().getResourceAsStream("/icon.png");
@@ -154,6 +155,31 @@ public class Main extends Application {
         } else {
             showLoginScreen();
         }
+    }
+
+    private void startWakeServer(Stage stage) {
+        Thread wakeThread = new Thread(() -> {
+            try {
+                java.net.ServerSocket ss = new java.net.ServerSocket();
+                ss.setReuseAddress(true);
+                ss.bind(new java.net.InetSocketAddress(java.net.InetAddress.getLoopbackAddress(), Launcher.WAKE_PORT));
+                while (!ss.isClosed()) {
+                    try (java.net.Socket s = ss.accept()) {
+                        s.getInputStream().read();
+                    }
+                    javafx.application.Platform.runLater(() -> {
+                        try {
+                            if (stage.isIconified()) stage.setIconified(false);
+                            stage.show();
+                            stage.toFront();
+                            stage.requestFocus();
+                        } catch (Exception ignored) {}
+                    });
+                }
+            } catch (Exception ignored) {}
+        }, "wake-server");
+        wakeThread.setDaemon(true);
+        wakeThread.start();
     }
 
     private void toggleLanguage() {
@@ -794,6 +820,8 @@ public class Main extends Application {
         mainScene.addEventFilter(MouseEvent.ANY, e -> lastActivityMillis = System.currentTimeMillis());
         mainScene.addEventFilter(KeyEvent.ANY, e -> lastActivityMillis = System.currentTimeMillis());
         primaryStage.setScene(mainScene);
+        primaryStage.show();
+        primaryStage.toFront();
         startAutoLockTimer();
     }
 
