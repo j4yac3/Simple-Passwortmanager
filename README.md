@@ -14,6 +14,8 @@ Dieses Projekt speichert **keine Daten in der Cloud**. Du hast die 100 %ige Kont
 * **⏲️ Auto-Lock:** Nach 5 Minuten Inaktivität sperrt sich der Tresor automatisch.
 * **🔐 Integrierte 2FA-Codes (TOTP):** 2FA-Secret pro Eintrag hinterlegen (Base32 oder `otpauth://`-Link) – der 6-stellige Code wird live auf der Karte angezeigt, aktualisiert sich alle 30 Sekunden selbst und ist kopierbar.
 * **🌐 Login-Assistent:** Öffnest du eine Website über den 🌍-Button, erkennt der Manager den Eintrag, fragt „Automatisch einloggen?" und legt Benutzername & Passwort nacheinander in die Zwischenablage.
+* **🌍 Zwei Sprachen:** Deutsch & Englisch – umschaltbar über den Sprach-Button oben rechts (bzw. auf jedem Anmeldebildschirm), Auswahl wird gespeichert.
+* **❓ 2FA-Hilfe integriert:** Das „?" neben dem 2FA-Feld erklärt Schritt für Schritt, wo du den Schlüssel auf der Website findest.
 * **📂 Workspaces:** Trenne z. B. „Privat" und „Arbeit" sauber voneinander.
 * **🎲 Passwort-Generator:** Sichere Zufallspasswörter mit einstellbarer Länge und Zeichensätzen. Eintrags-Passwörter dürfen beliebige Längen haben – die Mindestlänge gilt nur für das Master-Passwort.
 * **🌓 Dark & Light Mode**, **📱 Swipe-to-Delete mit Sicherheitsabfrage**, **📋 Clipboard-Auto-Clear nach 15 s**, **⌨️ Enter-Bedienerführung** in allen Formularen.

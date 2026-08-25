@@ -74,6 +74,8 @@ public class Main extends Application {
     private BorderPane mainLayout;
     private Timeline autoLockTimer;
     private long lastActivityMillis;
+    private Button langBtn;
+    private Runnable currentAuthRedraw;
 
     private VBox sidebar;
     private Label menuTitle;
@@ -106,6 +108,7 @@ public class Main extends Application {
     public void start(Stage primaryStage) {
         this.primaryStage = primaryStage;
         initDatabase();
+        I18n.setLanguage(getConfig("language"));
 
         try {
             InputStream iconStream = getClass().getResourceAsStream("/icon.png");
@@ -128,18 +131,29 @@ public class Main extends Application {
         }
     }
 
+    private void toggleLanguage() {
+        I18n.setLanguage(I18n.isEnglish() ? "de" : "en");
+        setConfig("language", I18n.getLanguage());
+        Scene scene = primaryStage != null ? primaryStage.getScene() : null;
+        if (scene != null && scene.getRoot() == mainLayout) {
+            buildAndShowMainUI();
+        } else if (currentAuthRedraw != null) {
+            currentAuthRedraw.run();
+        }
+    }
+
     private void showSetupScreen() {
-        VBox root = createAuthLayout("JM Passwortmanager", "Erstelle ein sicheres Master-Passwort, um deinen Tresor zu schützen.");
+        VBox root = createAuthLayout("JM Passwortmanager", I18n.tr("Erstelle ein sicheres Master-Passwort, um deinen Tresor zu schützen."));
 
         PasswordField passInput = new PasswordField();
-        passInput.setPromptText("Master-Passwort");
+        passInput.setPromptText(I18n.tr("Master-Passwort"));
         styleAuthField(passInput);
 
         PasswordField passConfirm = new PasswordField();
-        passConfirm.setPromptText("Passwort bestätigen");
+        passConfirm.setPromptText(I18n.tr("Passwort bestätigen"));
         styleAuthField(passConfirm);
 
-        Button submitBtn = createAuthButton("Tresor initialisieren");
+        Button submitBtn = createAuthButton(I18n.tr("Tresor initialisieren"));
         submitBtn.setOnAction(e -> performSetup(passInput, passConfirm));
         passInput.setOnAction(e -> passConfirm.requestFocus());
         passConfirm.setOnAction(e -> submitBtn.fire());
@@ -148,6 +162,7 @@ public class Main extends Application {
         primaryStage.setScene(new Scene(root, 1280, 720));
         primaryStage.show();
         primaryStage.centerOnScreen();
+        currentAuthRedraw = this::showSetupScreen;
     }
 
     private void performSetup(PasswordField passInput, PasswordField passConfirm) {
@@ -160,7 +175,7 @@ public class Main extends Application {
             return;
         }
         if (!p1.equals(p2)) {
-            showAlert("Die Passwörter stimmen nicht überein.");
+            showAlert(I18n.tr("Die Passwörter stimmen nicht überein."));
             return;
         }
 
@@ -169,26 +184,32 @@ public class Main extends Application {
             setupVaultSystem(p1, recoveryCode);
             showRecoveryCodeScreen(recoveryCode, this::buildAndShowMainUI);
         } catch (Exception ex) {
-            showAlert("Systemfehler bei der Initialisierung.");
+            showAlert(I18n.tr("Systemfehler bei der Initialisierung."));
         }
     }
 
     private void showLoginScreen() {
-        VBox root = createAuthLayout("Willkommen zurück", "Bitte gib dein Master-Passwort ein, um den Tresor zu entsperren.");
+        VBox root = createAuthLayout(I18n.tr("Willkommen zurück"), I18n.tr("Bitte gib dein Master-Passwort ein, um den Tresor zu entsperren."));
 
         PasswordField passInput = new PasswordField();
-        passInput.setPromptText("Master-Passwort");
+        passInput.setPromptText(I18n.tr("Master-Passwort"));
         styleAuthField(passInput);
 
-        CheckBox stayLoggedInBox = new CheckBox("Angemeldet bleiben");
-        stayLoggedInBox.setStyle("-fx-text-fill: #a1a1aa; -fx-font-size: 14px;");
-        stayLoggedInBox.setCursor(javafx.scene.Cursor.HAND);
+        CheckBox stayLoggedInBox = new CheckBox(I18n.tr("Angemeldet bleiben"));
+        String stayNormal = "-fx-text-fill: #d4d4d8; -fx-font-size: 14px; -fx-cursor: hand; -fx-color: #3f3f46; -fx-padding: 12px 18px; -fx-background-color: #18181b; -fx-background-radius: 12px; -fx-border-color: #27272a; -fx-border-radius: 12px;";
+        String stayHover = "-fx-text-fill: #ffffff; -fx-font-size: 14px; -fx-cursor: hand; -fx-color: #52525b; -fx-padding: 12px 18px; -fx-background-color: #1c1c1f; -fx-background-radius: 12px; -fx-border-color: #3f3f46; -fx-border-radius: 12px;";
+        String staySelected = "-fx-text-fill: #10b981; -fx-font-size: 14px; -fx-font-weight: bold; -fx-cursor: hand; -fx-color: #10b981; -fx-padding: 12px 18px; -fx-background-color: rgba(16,185,129,0.08); -fx-background-radius: 12px; -fx-border-color: #10b981; -fx-border-radius: 12px;";
+        stayLoggedInBox.setMaxWidth(350);
+        stayLoggedInBox.setStyle(stayNormal);
+        stayLoggedInBox.setOnMouseEntered(e -> { if (!stayLoggedInBox.isSelected()) stayLoggedInBox.setStyle(stayHover); });
+        stayLoggedInBox.setOnMouseExited(e -> { if (!stayLoggedInBox.isSelected()) stayLoggedInBox.setStyle(stayNormal); });
+        stayLoggedInBox.selectedProperty().addListener((obs, was, is) -> stayLoggedInBox.setStyle(is ? staySelected : stayNormal));
 
-        Button loginBtn = createAuthButton("Entsperren");
+        Button loginBtn = createAuthButton(I18n.tr("Entsperren"));
         loginBtn.setOnAction(e -> performLogin(passInput, stayLoggedInBox));
         passInput.setOnAction(e -> loginBtn.fire());
 
-        Button forgotBtn = new Button("Passwort vergessen?");
+        Button forgotBtn = new Button(I18n.tr("Passwort vergessen?"));
         forgotBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: #a1a1aa; -fx-cursor: hand; -fx-underline: true;");
         forgotBtn.setOnMouseEntered(e -> forgotBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: #ffffff; -fx-cursor: hand; -fx-underline: true;"));
         forgotBtn.setOnMouseExited(e -> forgotBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: #a1a1aa; -fx-cursor: hand; -fx-underline: true;"));
@@ -198,6 +219,7 @@ public class Main extends Application {
         primaryStage.setScene(new Scene(root, 1280, 720));
         primaryStage.show();
         primaryStage.centerOnScreen();
+        currentAuthRedraw = this::showLoginScreen;
     }
 
     private void performLogin(PasswordField passInput, CheckBox stayLoggedInBox) {
@@ -205,33 +227,34 @@ public class Main extends Application {
             if (stayLoggedInBox.isSelected()) savePersistentSession();
             continueAfterUnlock();
         } else {
-            showAlert("Falsches Master-Passwort!");
+            showAlert(I18n.tr("Falsches Master-Passwort!"));
             passInput.clear();
             Platform.runLater(passInput::requestFocus);
         }
     }
 
     private void showRecoveryScreen() {
-        VBox root = createAuthLayout("Passwort zurücksetzen", "Gib deinen Recovery-Code ein.");
+        VBox root = createAuthLayout(I18n.tr("Passwort zurücksetzen"), I18n.tr("Gib deinen Recovery-Code ein."));
 
         TextField codeInput = new TextField();
-        codeInput.setPromptText("Recovery-Code");
+        codeInput.setPromptText(I18n.tr("Recovery-Code"));
         styleAuthField(codeInput);
 
         PasswordField newPassInput = new PasswordField();
-        newPassInput.setPromptText("Neues Master-Passwort");
+        newPassInput.setPromptText(I18n.tr("Neues Master-Passwort"));
         styleAuthField(newPassInput);
 
-        Button resetBtn = createAuthButton("Passwort zurücksetzen");
+        Button resetBtn = createAuthButton(I18n.tr("Passwort zurücksetzen"));
         resetBtn.setOnAction(e -> performRecoveryReset(codeInput, newPassInput));
         newPassInput.setOnAction(e -> resetBtn.fire());
 
-        Button backBtn = new Button("Zurück zum Login");
+        Button backBtn = new Button(I18n.tr("Zurück zum Login"));
         backBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: #a1a1aa; -fx-cursor: hand;");
         backBtn.setOnAction(e -> showLoginScreen());
 
         root.getChildren().addAll(codeInput, newPassInput, resetBtn, backBtn);
         primaryStage.setScene(new Scene(root, 1280, 720));
+        currentAuthRedraw = this::showRecoveryScreen;
     }
 
     private void performRecoveryReset(TextField codeInput, PasswordField newPassInput) {
@@ -247,39 +270,40 @@ public class Main extends Application {
         if (tryUnlockWithRecoveryCodeAndReset(code, newPass)) {
             continueAfterUnlock();
         } else {
-            showAlert("Falscher oder ungültiger Recovery-Code.");
+            showAlert(I18n.tr("Falscher oder ungültiger Recovery-Code."));
             newPassInput.clear();
             Platform.runLater(newPassInput::requestFocus);
         }
     }
 
     private void showRecoveryCodeScreen(String code, Runnable onComplete) {
-        VBox root = createAuthLayout("WICHTIG: Recovery-Code", "Speichere diesen Code sicher ab!\nEr ist die einzige Möglichkeit, dein Passwort zurückzusetzen.");
+        VBox root = createAuthLayout(I18n.tr("WICHTIG: Recovery-Code"), I18n.tr("Speichere diesen Code sicher ab!\nEr ist die einzige Möglichkeit, dein Passwort zurückzusetzen."));
 
         Label codeLabel = new Label(code);
         codeLabel.setStyle("-fx-font-size: 26px; -fx-font-weight: bold; -fx-text-fill: #10b981; -fx-letter-spacing: 3px;");
 
-        Button copyBtn = new Button("Code kopieren");
+        Button copyBtn = new Button(I18n.tr("Code kopieren"));
         copyBtn.setStyle("-fx-background-color: #27272a; -fx-text-fill: white; -fx-padding: 10 20; -fx-background-radius: 8; -fx-cursor: hand;");
         copyBtn.setOnAction(e -> {
             copyToClipboard(code);
-            copyBtn.setText("Kopiert!");
+            copyBtn.setText(I18n.tr("Kopiert!"));
             copyBtn.setStyle("-fx-background-color: #10b981; -fx-text-fill: white; -fx-padding: 10 20; -fx-background-radius: 8; -fx-cursor: hand;");
         });
 
-        Button proceedBtn = createAuthButton("Ich habe den Code sicher gespeichert");
+        Button proceedBtn = createAuthButton(I18n.tr("Ich habe den Code sicher gespeichert"));
         proceedBtn.setOnAction(e -> onComplete.run());
 
         root.getChildren().addAll(codeLabel, copyBtn, proceedBtn);
         primaryStage.setScene(new Scene(root, 1280, 720));
+        currentAuthRedraw = () -> showRecoveryCodeScreen(code, onComplete);
     }
 
     private String validateMasterPassword(String password) {
         if (password == null || password.length() < 12) {
-            return "Das Master-Passwort muss mindestens 12 Zeichen lang sein.";
+            return I18n.tr("Das Master-Passwort muss mindestens 12 Zeichen lang sein.");
         }
         if (!password.matches(".*[a-z].*") || !password.matches(".*[A-Z].*") || !password.matches(".*[0-9].*")) {
-            return "Das Passwort braucht Groß- und Kleinbuchstaben sowie mindestens eine Zahl.";
+            return I18n.tr("Das Passwort braucht Groß- und Kleinbuchstaben sowie mindestens eine Zahl.");
         }
         return null;
     }
@@ -615,7 +639,7 @@ public class Main extends Application {
 
         Label iconLabel = new Label("🔒");
         iconLabel.setStyle("-fx-font-size: 24px;");
-        titleLabel = new Label("Passwortmanager");
+        titleLabel = new Label(I18n.tr("Passwortmanager"));
 
         Region topSpacer = new Region();
         HBox.setHgrow(topSpacer, Priority.ALWAYS);
@@ -635,17 +659,42 @@ public class Main extends Application {
         logoutBtn.setPadding(new Insets(0));
         logoutBtn.setOnAction(e -> performLogout());
 
-        topHeader.getChildren().addAll(toggleSidebarBtn, iconLabel, titleLabel, topSpacer, themeToggleBtn, logoutBtn);
+        langBtn = new Button(I18n.isEnglish() ? "DE" : "EN");
+        langBtn.setMinSize(40, 40);
+        langBtn.setPrefSize(40, 40);
+        langBtn.setPadding(new Insets(0));
+        langBtn.setOnAction(e -> toggleLanguage());
+
+        topHeader.getChildren().addAll(toggleSidebarBtn, iconLabel, titleLabel, topSpacer, themeToggleBtn, langBtn, logoutBtn);
 
         inputForm = new VBox(14);
         inputForm.setPadding(new Insets(24));
-        platformInput = createStyledTextField("Plattform (z.B. Google, GitHub)");
-        urlInput = createStyledTextField("Website-Link (z.B. https://github.com) - Optional");
-        totpInput = createStyledTextField("2FA-Secret (TOTP/Base32, optional)");
-        userInput = createStyledTextField("Benutzername / E-Mail");
+        platformInput = createStyledTextField(I18n.tr("Plattform (z.B. Google, GitHub)"));
+        urlInput = createStyledTextField(I18n.tr("Website-Link (z.B. https://github.com) - Optional"));
+        totpInput = createStyledTextField(I18n.tr("2FA-Schlüssel (optional, für Login-Codes)"));
+        Button totpHelpBtn = new Button("?");
+        totpHelpBtn.setPrefSize(46, 46);
+        totpHelpBtn.setMinSize(46, 46);
+        applyButtonStyle(totpHelpBtn,
+                "-fx-background-color: #18181b; -fx-text-fill: #38bdf8; -fx-font-size: 18px; -fx-font-weight: bold; -fx-background-radius: 12px; -fx-cursor: hand; -fx-border-color: #27272a; -fx-border-radius: 12px;",
+                "-fx-background-color: #27272a; -fx-text-fill: #7dd3fc; -fx-font-size: 18px; -fx-font-weight: bold; -fx-background-radius: 12px; -fx-cursor: hand; -fx-border-color: #3f3f46; -fx-border-radius: 12px;",
+                "-fx-background-color: #ffffff; -fx-text-fill: #0284c7; -fx-font-size: 18px; -fx-font-weight: bold; -fx-background-radius: 12px; -fx-cursor: hand; -fx-border-color: #e4e4e7; -fx-border-radius: 12px;",
+                "-fx-background-color: #f4f4f5; -fx-text-fill: #0369a1; -fx-font-size: 18px; -fx-font-weight: bold; -fx-background-radius: 12px; -fx-cursor: hand; -fx-border-color: #d4d4d8; -fx-border-radius: 12px;"
+        );
+        setupIndividualButtonHover(totpHelpBtn,
+                "-fx-background-color: #18181b; -fx-text-fill: #38bdf8; -fx-font-size: 18px; -fx-font-weight: bold; -fx-background-radius: 12px; -fx-cursor: hand; -fx-border-color: #27272a; -fx-border-radius: 12px;",
+                "-fx-background-color: #27272a; -fx-text-fill: #7dd3fc; -fx-font-size: 18px; -fx-font-weight: bold; -fx-background-radius: 12px; -fx-cursor: hand; -fx-border-color: #3f3f46; -fx-border-radius: 12px;",
+                "-fx-background-color: #ffffff; -fx-text-fill: #0284c7; -fx-font-size: 18px; -fx-font-weight: bold; -fx-background-radius: 12px; -fx-cursor: hand; -fx-border-color: #e4e4e7; -fx-border-radius: 12px;",
+                "-fx-background-color: #f4f4f5; -fx-text-fill: #0369a1; -fx-font-size: 18px; -fx-font-weight: bold; -fx-background-radius: 12px; -fx-cursor: hand; -fx-border-color: #d4d4d8; -fx-border-radius: 12px;"
+        );
+        totpHelpBtn.setOnAction(e -> showTotpHelpDialog());
+        HBox totpBox = new HBox(10);
+        HBox.setHgrow(totpInput, Priority.ALWAYS);
+        totpBox.getChildren().addAll(totpInput, totpHelpBtn);
+        userInput = createStyledTextField(I18n.tr("Benutzername / E-Mail"));
 
         HBox passwordBox = new HBox(10);
-        passwordInput = createStyledTextField("Passwort");
+        passwordInput = createStyledTextField(I18n.tr("Passwort"));
         HBox.setHgrow(passwordInput, Priority.ALWAYS);
 
         generateBtn = new Button("🎲");
@@ -688,11 +737,11 @@ public class Main extends Application {
                     passwordInput.clear();
                 }
             } else {
-                showAlert("Plattform, Benutzername und Passwort dürfen nicht leer sein.");
+                showAlert(I18n.tr("Plattform, Benutzername und Passwort dürfen nicht leer sein."));
             }
         });
 
-        inputForm.getChildren().addAll(platformInput, urlInput, totpInput, userInput, passwordBox, addBtn);
+        inputForm.getChildren().addAll(platformInput, urlInput, totpBox, userInput, passwordBox, addBtn);
 
         platformInput.setOnAction(e -> urlInput.requestFocus());
         urlInput.setOnAction(e -> totpInput.requestFocus());
@@ -761,6 +810,15 @@ public class Main extends Application {
                 "-fx-background-color: #fee2e2; -fx-text-fill: #b91c1c; -fx-font-size: 16px; -fx-background-radius: 50em; -fx-cursor: hand; -fx-border-color: #fecaca; -fx-border-radius: 50em;"
         );
 
+        String langText = I18n.isEnglish() ? "DE" : "EN";
+        applyButtonStyle(langBtn,
+                "-fx-background-color: #18181b; -fx-text-fill: #38bdf8; -fx-font-size: 13px; -fx-font-weight: bold; -fx-background-radius: 50em; -fx-cursor: hand; -fx-border-color: #27272a; -fx-border-radius: 50em;",
+                "-fx-background-color: #27272a; -fx-text-fill: #7dd3fc; -fx-font-size: 13px; -fx-font-weight: bold; -fx-background-radius: 50em; -fx-cursor: hand; -fx-border-color: #3f3f46; -fx-border-radius: 50em;",
+                "-fx-background-color: #ffffff; -fx-text-fill: #0284c7; -fx-font-size: 13px; -fx-font-weight: bold; -fx-background-radius: 50em; -fx-cursor: hand; -fx-border-color: #e4e4e7; -fx-border-radius: 50em;",
+                "-fx-background-color: #e0f2fe; -fx-text-fill: #0369a1; -fx-font-size: 13px; -fx-font-weight: bold; -fx-background-radius: 50em; -fx-cursor: hand; -fx-border-color: #bae6fd; -fx-border-radius: 50em;"
+        );
+        if (!langText.equals(langBtn.getText())) langBtn.setText(langText);
+
         applyButtonStyle(generateBtn,
                 "-fx-background-color: #18181b; -fx-text-fill: #a1a1aa; -fx-font-size: 20px; -fx-background-radius: 12px; -fx-cursor: hand; -fx-border-color: #27272a; -fx-border-radius: 12px;",
                 "-fx-background-color: #27272a; -fx-text-fill: #ffffff; -fx-font-size: 20px; -fx-background-radius: 12px; -fx-cursor: hand; -fx-border-color: #3f3f46; -fx-border-radius: 12px;",
@@ -797,7 +855,7 @@ public class Main extends Application {
         updateTextFieldStyleImmediate(passwordInput);
 
         if (noUser) {
-            addBtn.setText("👤 Bitte zuerst einen Workspace erstellen");
+            addBtn.setText(I18n.tr("👤 Bitte zuerst einen Workspace erstellen"));
             applyButtonStyle(addBtn,
                     "-fx-background-color: #3b82f6; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 12px; -fx-padding: 12px; -fx-cursor: hand; -fx-font-size: 14px;",
                     "-fx-background-color: #2563eb; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 12px; -fx-padding: 12px; -fx-cursor: hand; -fx-font-size: 14px;",
@@ -811,7 +869,7 @@ public class Main extends Application {
                     "-fx-background-color: #2563eb; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 12px; -fx-padding: 12px; -fx-cursor: hand; -fx-font-size: 14px;"
             );
         } else {
-            addBtn.setText("＋ Eintrag sicher verschlüsseln");
+            addBtn.setText(I18n.tr("＋ Eintrag sicher verschlüsseln"));
             applyButtonStyle(addBtn,
                     "-fx-background-color: #10b981; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 12px; -fx-padding: 12px; -fx-cursor: hand; -fx-font-size: 14px;",
                     "-fx-background-color: #059669; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 12px; -fx-padding: 12px; -fx-cursor: hand; -fx-font-size: 14px;",
@@ -851,6 +909,12 @@ public class Main extends Application {
                 "-fx-background-color: #27272a; -fx-text-fill: #ef4444; -fx-font-size: 16px; -fx-background-radius: 50em; -fx-cursor: hand; -fx-border-color: #3f3f46; -fx-border-radius: 50em;",
                 "-fx-background-color: #ffffff; -fx-text-fill: #dc2626; -fx-font-size: 16px; -fx-background-radius: 50em; -fx-cursor: hand; -fx-border-color: #e4e4e7; -fx-border-radius: 50em;",
                 "-fx-background-color: #fee2e2; -fx-text-fill: #b91c1c; -fx-font-size: 16px; -fx-background-radius: 50em; -fx-cursor: hand; -fx-border-color: #fecaca; -fx-border-radius: 50em;"
+        );
+        setupIndividualButtonHover(langBtn,
+                "-fx-background-color: #18181b; -fx-text-fill: #38bdf8; -fx-font-size: 13px; -fx-font-weight: bold; -fx-background-radius: 50em; -fx-cursor: hand; -fx-border-color: #27272a; -fx-border-radius: 50em;",
+                "-fx-background-color: #27272a; -fx-text-fill: #7dd3fc; -fx-font-size: 13px; -fx-font-weight: bold; -fx-background-radius: 50em; -fx-cursor: hand; -fx-border-color: #3f3f46; -fx-border-radius: 50em;",
+                "-fx-background-color: #ffffff; -fx-text-fill: #0284c7; -fx-font-size: 13px; -fx-font-weight: bold; -fx-background-radius: 50em; -fx-cursor: hand; -fx-border-color: #e4e4e7; -fx-border-radius: 50em;",
+                "-fx-background-color: #e0f2fe; -fx-text-fill: #0369a1; -fx-font-size: 13px; -fx-font-weight: bold; -fx-background-radius: 50em; -fx-cursor: hand; -fx-border-color: #bae6fd; -fx-border-radius: 50em;"
         );
         setupIndividualButtonHover(generateBtn,
                 "-fx-background-color: #18181b; -fx-text-fill: #a1a1aa; -fx-font-size: 20px; -fx-background-radius: 12px; -fx-cursor: hand; -fx-border-color: #27272a; -fx-border-radius: 12px;",
@@ -903,6 +967,18 @@ public class Main extends Application {
         root.setAlignment(Pos.CENTER);
         root.setStyle("-fx-background-color: #09090b;");
 
+        HBox langBar = new HBox();
+        langBar.setMaxWidth(Double.MAX_VALUE);
+        langBar.setPadding(new Insets(18, 24, 0, 24));
+        Button authLangBtn = new Button(I18n.isEnglish() ? "🌐 Deutsch" : "🌐 English");
+        authLangBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: #71717a; -fx-cursor: hand; -fx-font-size: 13px; -fx-padding: 6 12; -fx-background-radius: 50em; -fx-border-color: #27272a; -fx-border-radius: 50em;");
+        authLangBtn.setOnMouseEntered(e -> authLangBtn.setStyle("-fx-background-color: #18181b; -fx-text-fill: #ffffff; -fx-cursor: hand; -fx-font-size: 13px; -fx-padding: 6 12; -fx-background-radius: 50em; -fx-border-color: #3f3f46; -fx-border-radius: 50em;"));
+        authLangBtn.setOnMouseExited(e -> authLangBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: #71717a; -fx-cursor: hand; -fx-font-size: 13px; -fx-padding: 6 12; -fx-background-radius: 50em; -fx-border-color: #27272a; -fx-border-radius: 50em;"));
+        authLangBtn.setOnAction(e -> toggleLanguage());
+        Region langSpacer = new Region();
+        HBox.setHgrow(langSpacer, Priority.ALWAYS);
+        langBar.getChildren().addAll(langSpacer, authLangBtn);
+
         Label icon = new Label("🔒");
         icon.setStyle("-fx-font-size: 48px;");
 
@@ -912,7 +988,7 @@ public class Main extends Application {
         Label subLabel = new Label(subtitle);
         subLabel.setStyle("-fx-text-fill: #a1a1aa; -fx-font-size: 14px; -fx-text-alignment: center;");
 
-        root.getChildren().addAll(icon, titleLabel, subLabel);
+        root.getChildren().addAll(langBar, icon, titleLabel, subLabel);
         return root;
     }
 
@@ -999,9 +1075,9 @@ public class Main extends Application {
                 for (Node btnNode : buttonBox.getChildren()) {
                     if (btnNode instanceof Button) {
                         Button btn = (Button) btnNode;
-                        if (btn.getText().contains("Kopieren")) {
+                        if ("copy".equals(btn.getUserData())) {
                             btn.setStyle("-fx-background-color: " + btnBgNormal + "; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-padding: 8px 16px; -fx-cursor: hand; -fx-font-size: 13px;");
-                        } else if (!btn.getText().contains("Kopiert")) {
+                        } else {
                             btn.setStyle("-fx-background-color: " + utilityBtnBg + "; -fx-text-fill: " + utilityBtnText + "; -fx-background-radius: 8px; -fx-padding: 8px 12px; -fx-cursor: hand; -fx-font-size: 13px;");
                         }
                     }
@@ -1041,14 +1117,14 @@ public class Main extends Application {
                 "-fx-background-color: #18181b; -fx-border-color: #3f3f46; -fx-border-width: 1px; -fx-border-radius: 16px; -fx-background-radius: 16px; -fx-effect: dropshadow(three-pass-box, " + dropShadow + ", 25, 0, 0, 10);" :
                 "-fx-background-color: #ffffff; -fx-border-color: #e4e4e7; -fx-border-width: 1px; -fx-border-radius: 16px; -fx-background-radius: 16px; -fx-effect: dropshadow(three-pass-box, " + dropShadow + ", 25, 0, 0, 10);");
 
-        Label title = new Label("Passwort generieren");
+        Label title = new Label(I18n.tr("Passwort generieren"));
         title.setStyle(isDarkMode ? "-fx-text-fill: #ffffff; -fx-font-size: 20px; -fx-font-weight: bold;" : "-fx-text-fill: #09090b; -fx-font-size: 20px; -fx-font-weight: bold;");
 
         TextField previewField = new TextField();
         previewField.setEditable(false);
         updateTextFieldStyleImmediate(previewField);
 
-        Button refreshBtn = new Button("🔄 Neu würfeln");
+        Button refreshBtn = new Button(I18n.tr("🔄 Neu würfeln"));
         refreshBtn.setStyle(isDarkMode ?
                 "-fx-background-color: #27272a; -fx-text-fill: #ffffff; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 8px 12px; -fx-font-size: 13px;" :
                 "-fx-background-color: #e4e4e7; -fx-text-fill: #09090b; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 8px 12px; -fx-font-size: 13px;");
@@ -1059,7 +1135,7 @@ public class Main extends Application {
 
         HBox lengthBox = new HBox(10);
         lengthBox.setAlignment(Pos.CENTER_LEFT);
-        Label lengthLabel = new Label("Länge: 16");
+        Label lengthLabel = new Label(I18n.tr("Länge: {0}", 16));
         lengthLabel.setPrefWidth(70);
         lengthLabel.setStyle(isDarkMode ? "-fx-text-fill: #a1a1aa; -fx-font-weight: bold;" : "-fx-text-fill: #71717a; -fx-font-weight: bold;");
 
@@ -1068,10 +1144,10 @@ public class Main extends Application {
         HBox.setHgrow(lengthSlider, Priority.ALWAYS);
         lengthBox.getChildren().addAll(lengthLabel, lengthSlider);
 
-        CheckBox cbUpper = new CheckBox("Großbuchstaben (A-Z)");
-        CheckBox cbLower = new CheckBox("Kleinbuchstaben (a-z)");
-        CheckBox cbNumbers = new CheckBox("Zahlen (0-9)");
-        CheckBox cbSpecial = new CheckBox("Sonderzeichen (!@#...)");
+        CheckBox cbUpper = new CheckBox(I18n.tr("Großbuchstaben (A-Z)"));
+        CheckBox cbLower = new CheckBox(I18n.tr("Kleinbuchstaben (a-z)"));
+        CheckBox cbNumbers = new CheckBox(I18n.tr("Zahlen (0-9)"));
+        CheckBox cbSpecial = new CheckBox(I18n.tr("Sonderzeichen (!@#...)"));
 
         String cbStyle = isDarkMode ? "-fx-text-fill: #e4e4e7; -fx-font-size: 14px;" : "-fx-text-fill: #18181b; -fx-font-size: 14px;";
         cbUpper.setStyle(cbStyle); cbLower.setStyle(cbStyle); cbNumbers.setStyle(cbStyle); cbSpecial.setStyle(cbStyle);
@@ -1084,7 +1160,7 @@ public class Main extends Application {
 
         Runnable updatePreview = () -> {
             int len = (int) lengthSlider.getValue();
-            lengthLabel.setText("Länge: " + len);
+            lengthLabel.setText(I18n.tr("Länge: {0}", len));
             if (!cbUpper.isSelected() && !cbLower.isSelected() && !cbNumbers.isSelected() && !cbSpecial.isSelected()) {
                 cbLower.setSelected(true);
             }
@@ -1103,8 +1179,8 @@ public class Main extends Application {
         buttonBox.setAlignment(Pos.CENTER_RIGHT);
         buttonBox.setPadding(new Insets(10, 0, 0, 0));
 
-        Button cancelBtn = new Button("Abbrechen");
-        Button applyBtn = new Button("Übernehmen");
+        Button cancelBtn = new Button(I18n.tr("Abbrechen"));
+        Button applyBtn = new Button(I18n.tr("Übernehmen"));
 
         String cancelBtnNormal = isDarkMode ? "-fx-background-color: transparent; -fx-text-fill: #a1a1aa; -fx-font-weight: bold; -fx-cursor: hand; -fx-padding: 8px 16px;" : "-fx-background-color: transparent; -fx-text-fill: #71717a; -fx-font-weight: bold; -fx-cursor: hand; -fx-padding: 8px 16px;";
         String cancelBtnHover = isDarkMode ? "-fx-background-color: #27272a; -fx-text-fill: #ffffff; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 8px 16px;" : "-fx-background-color: #f4f4f5; -fx-text-fill: #09090b; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 8px 16px;";
@@ -1188,14 +1264,14 @@ public class Main extends Application {
                 "-fx-background-color: #18181b; -fx-border-color: #3f3f46; -fx-border-width: 1px; -fx-border-radius: 16px; -fx-background-radius: 16px; -fx-effect: dropshadow(three-pass-box, " + dropShadow + ", 25, 0, 0, 10);" :
                 "-fx-background-color: #ffffff; -fx-border-color: #e4e4e7; -fx-border-width: 1px; -fx-border-radius: 16px; -fx-background-radius: 16px; -fx-effect: dropshadow(three-pass-box, " + dropShadow + ", 25, 0, 0, 10);");
 
-        Label title = new Label("Neuer Workspace");
+        Label title = new Label(I18n.tr("Neuer Workspace"));
         title.setStyle(isDarkMode ? "-fx-text-fill: #ffffff; -fx-font-size: 20px; -fx-font-weight: bold;" : "-fx-text-fill: #09090b; -fx-font-size: 20px; -fx-font-weight: bold;");
 
-        Label subtitle = new Label("Gib einen Namen für das neue Konto ein.");
+        Label subtitle = new Label(I18n.tr("Gib einen Namen für das neue Konto ein."));
         subtitle.setStyle(isDarkMode ? "-fx-text-fill: #a1a1aa; -fx-font-size: 13px;" : "-fx-text-fill: #71717a; -fx-font-size: 13px;");
 
         TextField nameInput = new TextField();
-        nameInput.setPromptText("z.B. Arbeit, Privat...");
+        nameInput.setPromptText(I18n.tr("z.B. Arbeit, Privat..."));
         updateTextFieldStyleImmediate(nameInput);
         nameInput.focusedProperty().addListener((obs, oldVal, newVal) -> updateTextFieldStyleImmediate(nameInput));
 
@@ -1203,8 +1279,8 @@ public class Main extends Application {
         buttonBox.setAlignment(Pos.CENTER_RIGHT);
         buttonBox.setPadding(new Insets(10, 0, 0, 0));
 
-        Button cancelBtn = new Button("Abbrechen");
-        Button createBtn = new Button("Erstellen");
+        Button cancelBtn = new Button(I18n.tr("Abbrechen"));
+        Button createBtn = new Button(I18n.tr("Erstellen"));
 
         String cancelBtnNormal = isDarkMode ? "-fx-background-color: transparent; -fx-text-fill: #a1a1aa; -fx-font-weight: bold; -fx-cursor: hand; -fx-padding: 8px 16px;" : "-fx-background-color: transparent; -fx-text-fill: #71717a; -fx-font-weight: bold; -fx-cursor: hand; -fx-padding: 8px 16px;";
         String cancelBtnHover = isDarkMode ? "-fx-background-color: #27272a; -fx-text-fill: #ffffff; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 8px 16px;" : "-fx-background-color: #f4f4f5; -fx-text-fill: #09090b; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 8px 16px;";
@@ -1236,7 +1312,7 @@ public class Main extends Application {
                     switchUser(trimmedName);
                     dialogStage.close();
                 } else {
-                    showAlert("Dieses Konto existiert bereits!");
+                    showAlert(I18n.tr("Dieses Konto existiert bereits!"));
                 }
             }
         };
@@ -1270,22 +1346,22 @@ public class Main extends Application {
                 "-fx-background-color: #18181b; -fx-border-color: #3f3f46; -fx-border-width: 1px; -fx-border-radius: 16px; -fx-background-radius: 16px; -fx-effect: dropshadow(three-pass-box, " + dropShadow + ", 25, 0, 0, 10);" :
                 "-fx-background-color: #ffffff; -fx-border-color: #e4e4e7; -fx-border-width: 1px; -fx-border-radius: 16px; -fx-background-radius: 16px; -fx-effect: dropshadow(three-pass-box, " + dropShadow + ", 25, 0, 0, 10);");
 
-        Label title = new Label("Sicherheitsprüfung");
+        Label title = new Label(I18n.tr("Sicherheitsprüfung"));
         title.setStyle(isDarkMode ? "-fx-text-fill: #ffffff; -fx-font-size: 20px; -fx-font-weight: bold;" : "-fx-text-fill: #09090b; -fx-font-size: 20px; -fx-font-weight: bold;");
 
-        Label subtitle = new Label("Bitte Master-Passwort eingeben:");
+        Label subtitle = new Label(I18n.tr("Bitte Master-Passwort eingeben:"));
         subtitle.setStyle(isDarkMode ? "-fx-text-fill: #a1a1aa; -fx-font-size: 13px;" : "-fx-text-fill: #71717a; -fx-font-size: 13px;");
 
         PasswordField passInput = new PasswordField();
-        passInput.setPromptText("Master-Passwort");
+        passInput.setPromptText(I18n.tr("Master-Passwort"));
         updateTextFieldStyleImmediate(passInput);
         passInput.focusedProperty().addListener((obs, oldVal, newVal) -> updateTextFieldStyleImmediate(passInput));
 
         HBox buttonBox = new HBox(12);
         buttonBox.setAlignment(Pos.CENTER_RIGHT);
 
-        Button cancelBtn = new Button("Abbrechen");
-        Button confirmBtn = new Button("Bestätigen");
+        Button cancelBtn = new Button(I18n.tr("Abbrechen"));
+        Button confirmBtn = new Button(I18n.tr("Bestätigen"));
 
         String cancelBtnNormal = isDarkMode ? "-fx-background-color: transparent; -fx-text-fill: #a1a1aa; -fx-font-weight: bold; -fx-cursor: hand; -fx-padding: 8px 16px;" : "-fx-background-color: transparent; -fx-text-fill: #71717a; -fx-font-weight: bold; -fx-cursor: hand; -fx-padding: 8px 16px;";
         String cancelBtnHover = isDarkMode ? "-fx-background-color: #27272a; -fx-text-fill: #ffffff; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 8px 16px;" : "-fx-background-color: #f4f4f5; -fx-text-fill: #09090b; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 8px 16px;";
@@ -1341,29 +1417,48 @@ public class Main extends Application {
 
         VBox header = new VBox(5);
         header.setPadding(new Insets(24, 24, 16, 24));
-        Label title = new Label("Eintrag bearbeiten");
+        Label title = new Label(I18n.tr("Eintrag bearbeiten"));
         title.setStyle(isDarkMode ? "-fx-text-fill: #ffffff; -fx-font-size: 20px; -fx-font-weight: bold;" : "-fx-text-fill: #09090b; -fx-font-size: 20px; -fx-font-weight: bold;");
-        Label subTitle = new Label("Passe die Felder an und speichere die Änderungen.");
+        Label subTitle = new Label(I18n.tr("Passe die Felder an und speichere die Änderungen."));
         subTitle.setStyle(isDarkMode ? "-fx-text-fill: #a1a1aa; -fx-font-size: 13px;" : "-fx-text-fill: #71717a; -fx-font-size: 13px;");
         header.getChildren().addAll(title, subTitle);
 
         VBox formBox = new VBox(16);
         formBox.setPadding(new Insets(0, 24, 16, 24));
 
-        TextField platField = createStyledTextField("Plattform");
+        TextField platField = createStyledTextField(I18n.tr("Plattform"));
         platField.setText(oldPlat);
 
-        TextField urlField = createStyledTextField("URL (Optional)");
+        TextField urlField = createStyledTextField(I18n.tr("URL (Optional)"));
         urlField.setText(oldUrl);
 
-        TextField totpField = createStyledTextField("2FA-Secret (TOTP/Base32, optional)");
+        TextField totpField = createStyledTextField(I18n.tr("2FA-Schlüssel (optional, für Login-Codes)"));
         totpField.setText(oldTotp);
+        Button totpFieldHelpBtn = new Button("?");
+        totpFieldHelpBtn.setPrefSize(46, 46);
+        totpFieldHelpBtn.setMinSize(46, 46);
+        applyButtonStyle(totpFieldHelpBtn,
+                "-fx-background-color: #18181b; -fx-text-fill: #38bdf8; -fx-font-size: 18px; -fx-font-weight: bold; -fx-background-radius: 12px; -fx-cursor: hand; -fx-border-color: #27272a; -fx-border-radius: 12px;",
+                "-fx-background-color: #27272a; -fx-text-fill: #7dd3fc; -fx-font-size: 18px; -fx-font-weight: bold; -fx-background-radius: 12px; -fx-cursor: hand; -fx-border-color: #3f3f46; -fx-border-radius: 12px;",
+                "-fx-background-color: #ffffff; -fx-text-fill: #0284c7; -fx-font-size: 18px; -fx-font-weight: bold; -fx-background-radius: 12px; -fx-cursor: hand; -fx-border-color: #e4e4e7; -fx-border-radius: 12px;",
+                "-fx-background-color: #f4f4f5; -fx-text-fill: #0369a1; -fx-font-size: 18px; -fx-font-weight: bold; -fx-background-radius: 12px; -fx-cursor: hand; -fx-border-color: #d4d4d8; -fx-border-radius: 12px;"
+        );
+        setupIndividualButtonHover(totpFieldHelpBtn,
+                "-fx-background-color: #18181b; -fx-text-fill: #38bdf8; -fx-font-size: 18px; -fx-font-weight: bold; -fx-background-radius: 12px; -fx-cursor: hand; -fx-border-color: #27272a; -fx-border-radius: 12px;",
+                "-fx-background-color: #27272a; -fx-text-fill: #7dd3fc; -fx-font-size: 18px; -fx-font-weight: bold; -fx-background-radius: 12px; -fx-cursor: hand; -fx-border-color: #3f3f46; -fx-border-radius: 12px;",
+                "-fx-background-color: #ffffff; -fx-text-fill: #0284c7; -fx-font-size: 18px; -fx-font-weight: bold; -fx-background-radius: 12px; -fx-cursor: hand; -fx-border-color: #e4e4e7; -fx-border-radius: 12px;",
+                "-fx-background-color: #f4f4f5; -fx-text-fill: #0369a1; -fx-font-size: 18px; -fx-font-weight: bold; -fx-background-radius: 12px; -fx-cursor: hand; -fx-border-color: #d4d4d8; -fx-border-radius: 12px;"
+        );
+        totpFieldHelpBtn.setOnAction(e -> showTotpHelpDialog());
+        HBox totpFieldBox = new HBox(10);
+        HBox.setHgrow(totpField, Priority.ALWAYS);
+        totpFieldBox.getChildren().addAll(totpField, totpFieldHelpBtn);
 
-        TextField userField = createStyledTextField("Benutzername");
+        TextField userField = createStyledTextField(I18n.tr("Benutzername"));
         userField.setText(oldUser);
 
         HBox passBox = new HBox(10);
-        TextField passField = createStyledTextField("Passwort");
+        TextField passField = createStyledTextField(I18n.tr("Passwort"));
         passField.setText(oldPass);
         HBox.setHgrow(passField, Priority.ALWAYS);
 
@@ -1379,7 +1474,7 @@ public class Main extends Application {
         genBtn.setOnAction(e -> showPasswordGeneratorDialog(passField));
         passBox.getChildren().addAll(passField, genBtn);
 
-        formBox.getChildren().addAll(platField, urlField, totpField, userField, passBox);
+        formBox.getChildren().addAll(platField, urlField, totpFieldBox, userField, passBox);
 
         platField.setOnAction(e -> urlField.requestFocus());
         urlField.setOnAction(e -> totpField.requestFocus());
@@ -1398,8 +1493,8 @@ public class Main extends Application {
         buttonBox.setAlignment(Pos.CENTER_RIGHT);
         buttonBox.setPadding(new Insets(16, 24, 24, 24));
 
-        Button cancelBtn = new Button("Abbrechen");
-        Button saveBtn = new Button("Speichern");
+        Button cancelBtn = new Button(I18n.tr("Abbrechen"));
+        Button saveBtn = new Button(I18n.tr("Speichern"));
 
         String cancelBtnNormal = isDarkMode ? "-fx-background-color: transparent; -fx-text-fill: #a1a1aa; -fx-font-weight: bold; -fx-cursor: hand; -fx-padding: 8px 16px;" : "-fx-background-color: transparent; -fx-text-fill: #71717a; -fx-font-weight: bold; -fx-cursor: hand; -fx-padding: 8px 16px;";
         String cancelBtnHover = isDarkMode ? "-fx-background-color: #27272a; -fx-text-fill: #ffffff; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 8px 16px;" : "-fx-background-color: #f4f4f5; -fx-text-fill: #09090b; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 8px 16px;";
@@ -1435,7 +1530,7 @@ public class Main extends Application {
                 loadEntriesFromDatabase();
                 dialogStage.close();
             } else {
-                showAlert("Plattform, Benutzername und Passwort dürfen nicht leer sein.");
+                showAlert(I18n.tr("Plattform, Benutzername und Passwort dürfen nicht leer sein."));
             }
         });
 
@@ -1488,7 +1583,7 @@ public class Main extends Application {
             dialogStage.close();
         });
 
-        Button cancelBtn = new Button("Abbrechen");
+        Button cancelBtn = new Button(I18n.tr("Abbrechen"));
         String cancelNormal = "-fx-background-color: transparent; -fx-text-fill: " + subText + "; -fx-font-weight: bold; -fx-cursor: hand; -fx-padding: 8px 16px;";
         String cancelHover = "-fx-background-color: " + (isDarkMode ? "#27272a" : "#e4e4e7") + "; -fx-text-fill: " + mainText + "; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 8px 16px;";
         cancelBtn.setStyle(cancelNormal);
@@ -1521,11 +1616,52 @@ public class Main extends Application {
             }
         }
         if (hasEntries) return;
-        Label hint = new Label("Noch keine Einträge für \"" + currentUser + "\".\nFüge oben deinen ersten Eintrag hinzu.");
+        Label hint = new Label(I18n.tr("Noch keine Einträge für \"{0}\".\nFüge oben deinen ersten Eintrag hinzu.", currentUser));
         hint.setId("emptyHint");
         hint.setWrapText(true);
         hint.setStyle("-fx-text-fill: " + (isDarkMode ? "#52525b" : "#a1a1aa") + "; -fx-font-size: 14px; -fx-text-alignment: center; -fx-padding: 30px;");
         entriesContainer.getChildren().add(hint);
+    }
+
+    private void showTotpHelpDialog() {
+        Stage dialogStage = new Stage();
+        dialogStage.initOwner(primaryStage);
+        dialogStage.initModality(Modality.APPLICATION_MODAL);
+        dialogStage.initStyle(StageStyle.TRANSPARENT);
+
+        VBox root = new VBox(16);
+        root.setPadding(new Insets(26));
+        root.setPrefWidth(430);
+
+        String dropShadow = isDarkMode ? "rgba(0,0,0,0.6)" : "rgba(0,0,0,0.15)";
+        String mainText = isDarkMode ? "#ffffff" : "#09090b";
+        String subText = isDarkMode ? "#a1a1aa" : "#71717a";
+        root.setStyle("-fx-background-color: " + (isDarkMode ? "#18181b" : "#ffffff") + "; -fx-border-color: #10b981; -fx-border-width: 1px; -fx-border-radius: 16px; -fx-background-radius: 16px; -fx-effect: dropshadow(three-pass-box, " + dropShadow + ", 25, 0, 0, 10);");
+
+        Label title = new Label("🔐 " + I18n.tr("Wie funktioniert 2FA?"));
+        title.setStyle("-fx-text-fill: " + mainText + "; -fx-font-size: 19px; -fx-font-weight: bold;");
+        title.setWrapText(true);
+
+        Label intro = new Label(I18n.tr("2FA schützt deine Konten mit einem zusätzlichen Code: einer 6-stelligen Zahl, die sich alle 30 Sekunden ändert."));
+        intro.setWrapText(true);
+        intro.setStyle("-fx-text-fill: " + subText + "; -fx-font-size: 14px;");
+
+        Label steps = new Label(I18n.tr("So einfach gehts:\n1. Öffne die Website → Sicherheit → Zwei-Faktor-Aktivierung.\n2. Wähle \"Authenticator-App\", dann \"Kann nicht scannen?\" oder \"Schlüssel anzeigen\".\n3. Kopiere den angezeigten Schlüssel in das Feld hier.\n\nBeim Login fragt dich die Website dann nach dem aktuellen Code aus dieser App."));
+        steps.setWrapText(true);
+        steps.setStyle("-fx-text-fill: " + subText + "; -fx-font-size: 14px;");
+
+        Button okBtn = new Button(I18n.tr("Alles klar!"));
+        okBtn.setMaxWidth(Double.MAX_VALUE);
+        okBtn.setStyle("-fx-background-color: #10b981; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 12px; -fx-font-size: 14px;");
+        okBtn.setOnMouseEntered(e -> okBtn.setStyle("-fx-background-color: #059669; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 12px; -fx-font-size: 14px;"));
+        okBtn.setOnMouseExited(e -> okBtn.setStyle("-fx-background-color: #10b981; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 12px; -fx-font-size: 14px;"));
+        okBtn.setOnAction(e -> dialogStage.close());
+
+        root.getChildren().addAll(title, intro, steps, okBtn);
+        Scene scene = new Scene(root);
+        scene.setFill(Color.TRANSPARENT);
+        dialogStage.setScene(scene);
+        dialogStage.showAndWait();
     }
 
     private void showAlert(String message) {
@@ -1547,7 +1683,7 @@ public class Main extends Application {
         header.setAlignment(Pos.CENTER_LEFT);
         Label icon = new Label("⚠️");
         icon.setStyle("-fx-font-size: 20px;");
-        Label title = new Label("Hinweis");
+        Label title = new Label(I18n.tr("Hinweis"));
         title.setStyle(isDarkMode ? "-fx-text-fill: #ffffff; -fx-font-size: 18px; -fx-font-weight: bold;" : "-fx-text-fill: #09090b; -fx-font-size: 18px; -fx-font-weight: bold;");
         header.getChildren().addAll(icon, title);
 
@@ -1555,7 +1691,7 @@ public class Main extends Application {
         msgLabel.setWrapText(true);
         msgLabel.setStyle(isDarkMode ? "-fx-text-fill: #a1a1aa; -fx-font-size: 14px;" : "-fx-text-fill: #71717a; -fx-font-size: 14px;");
 
-        Button okBtn = new Button("Verstanden");
+        Button okBtn = new Button(I18n.tr("Verstanden"));
         String okBtnNormal = "-fx-background-color: #ef4444; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 8px 16px; -fx-min-width: 100px;";
         String okBtnHover = "-fx-background-color: #dc2626; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 8px 16px; -fx-min-width: 100px;";
         okBtn.setStyle(okBtnNormal);
@@ -1646,7 +1782,7 @@ public class Main extends Application {
         });
 
         deleteBtn.setOnAction(e -> {
-            if (!showConfirmDialog("Konto löschen?", "\"" + name + "\" und ALLE zugehörigen Einträge wirklich löschen?\nDas kann nicht rückgängig gemacht werden.", "Alles löschen")) {
+            if (!showConfirmDialog(I18n.tr("Konto löschen?"), I18n.tr("\"{0}\" und ALLE zugehörigen Einträge wirklich löschen?\nDas kann nicht rückgängig gemacht werden.", name), I18n.tr("Alles löschen"))) {
                 loadUsersFromDatabase();
                 updateFormState();
                 return;
@@ -1675,7 +1811,7 @@ public class Main extends Application {
         backLayer.setStyle("-fx-background-color: #dc2626; -fx-background-radius: 14px;");
         backLayer.setVisible(false);
 
-        Button deleteBtn = new Button("🗑 Eintrag löschen");
+        Button deleteBtn = new Button(I18n.tr("🗑 Eintrag löschen"));
         deleteBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: white; -fx-font-weight: bold; -fx-padding: 0 25px 0 0; -fx-cursor: hand; -fx-font-size: 14px;");
         backLayer.getChildren().add(deleteBtn);
 
@@ -1691,7 +1827,7 @@ public class Main extends Application {
         frontLayer.setStyle("-fx-background-color: " + cardBg + "; -fx-background-radius: 14px; -fx-border-color: " + cardBorder + "; -fx-border-radius: 14px;");
 
         VBox textContainer = new VBox(4);
-        Label platformLabel = new Label(platform != null ? platform : "Unbekannt");
+        Label platformLabel = new Label(platform != null ? platform : I18n.tr("Unbekannt"));
         platformLabel.setStyle("-fx-text-fill: " + titleText + "; -fx-font-weight: bold; -fx-font-size: 16px;");
 
         Label userLabel = new Label(username != null ? username : "");
@@ -1793,31 +1929,32 @@ public class Main extends Application {
                 if (username != null && !username.isEmpty() && passwordToCopy != null && !passwordToCopy.isEmpty()) {
                     showQuickLoginDialog(platform, url, username, passwordToCopy);
                 } else if (!openUrl(url)) {
-                    showAlert("Der Link konnte nicht im Browser geöffnet werden.");
+                    showAlert(I18n.tr("Der Link konnte nicht im Browser geöffnet werden."));
                 }
             });
             actionButtons.getChildren().add(linkBtn);
         }
 
-        Button copyBtn = new Button("📋 Kopieren");
+        Button copyBtn = new Button(I18n.tr("📋 Kopieren"));
+        copyBtn.setUserData("copy");
         String copyBtnNormal = isDarkMode ? "#4f46e5" : "#6366f1";
         String copyBtnHover = isDarkMode ? "#4338ca" : "#4f46e5";
         copyBtn.setStyle("-fx-background-color: " + copyBtnNormal + "; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-padding: 8px 16px; -fx-cursor: hand; -fx-font-size: 13px;");
 
         copyBtn.setOnMouseEntered(e -> {
-            if(!copyBtn.getText().contains("Kopiert")) copyBtn.setStyle("-fx-background-color: " + copyBtnHover + "; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-padding: 8px 16px; -fx-cursor: hand; -fx-font-size: 13px;");
+            if(!copyBtn.getText().startsWith("✓")) copyBtn.setStyle("-fx-background-color: " + copyBtnHover + "; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-padding: 8px 16px; -fx-cursor: hand; -fx-font-size: 13px;");
         });
         copyBtn.setOnMouseExited(e -> {
-            if(!copyBtn.getText().contains("Kopiert")) copyBtn.setStyle("-fx-background-color: " + copyBtnNormal + "; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-padding: 8px 16px; -fx-cursor: hand; -fx-font-size: 13px;");
+            if(!copyBtn.getText().startsWith("✓")) copyBtn.setStyle("-fx-background-color: " + copyBtnNormal + "; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-padding: 8px 16px; -fx-cursor: hand; -fx-font-size: 13px;");
         });
 
         copyBtn.setOnAction(event -> {
             copyToClipboard(passwordToCopy);
-            copyBtn.setText("✓ Kopiert!");
+            copyBtn.setText(I18n.tr("✓ Kopiert!"));
             copyBtn.setStyle("-fx-background-color: #10b981; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-padding: 8px 16px; -fx-font-size: 13px;");
 
             Timeline resetTextTimeline = new Timeline(new KeyFrame(Duration.seconds(3), evt -> {
-                copyBtn.setText("📋 Kopieren");
+                copyBtn.setText(I18n.tr("📋 Kopieren"));
                 copyBtn.setStyle("-fx-background-color: " + copyBtnNormal + "; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-padding: 8px 16px; -fx-cursor: hand; -fx-font-size: 13px;");
             }));
             resetTextTimeline.play();
@@ -1848,7 +1985,7 @@ public class Main extends Application {
         });
 
         deleteBtn.setOnAction(e -> {
-            if (!showConfirmDialog("Eintrag löschen?", "\"" + (platform != null ? platform : "Unbekannt") + "\" wirklich löschen?\nDas kann nicht rückgängig gemacht werden.", "Löschen")) return;
+            if (!showConfirmDialog(I18n.tr("Eintrag löschen?"), I18n.tr("\"{0}\" wirklich löschen?\nDas kann nicht rückgängig gemacht werden.", platform != null ? platform : I18n.tr("Unbekannt")), I18n.tr("Löschen"))) return;
             stopTotpTimeline(container);
             deleteFromDatabase(id);
             entriesContainer.getChildren().remove(container);
@@ -1878,7 +2015,7 @@ public class Main extends Application {
         Label icon = new Label("🌐");
         icon.setStyle("-fx-font-size: 34px;");
 
-        Label title = new Label("Website erkannt");
+        Label title = new Label(I18n.tr("Website erkannt"));
         title.setStyle("-fx-text-fill: " + mainText + "; -fx-font-size: 20px; -fx-font-weight: bold;");
 
         String domain = extractDomain(url);
@@ -1894,13 +2031,13 @@ public class Main extends Application {
         stepBar.setPrefWidth(Double.MAX_VALUE);
         stepBar.setStyle("-fx-accent: #10b981;");
 
-        Button loginBtn = new Button("🚀 Automatisch einloggen");
+        Button loginBtn = new Button(I18n.tr("🚀 Automatisch einloggen"));
         loginBtn.setMaxWidth(Double.MAX_VALUE);
         loginBtn.setStyle("-fx-background-color: #10b981; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 12px; -fx-font-size: 14px;");
         loginBtn.setOnMouseEntered(e -> loginBtn.setStyle("-fx-background-color: #059669; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 12px; -fx-font-size: 14px;"));
         loginBtn.setOnMouseExited(e -> loginBtn.setStyle("-fx-background-color: #10b981; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 12px; -fx-font-size: 14px;"));
 
-        Button openOnlyBtn = new Button("Nur Website öffnen");
+        Button openOnlyBtn = new Button(I18n.tr("Nur Website öffnen"));
         openOnlyBtn.setMaxWidth(Double.MAX_VALUE);
         String openOnlyNormal = "-fx-background-color: transparent; -fx-text-fill: " + subText + "; -fx-cursor: hand; -fx-padding: 8px;";
         String openOnlyHover = "-fx-background-color: " + (isDarkMode ? "#27272a" : "#f4f4f5") + "; -fx-text-fill: " + mainText + "; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 8px;";
@@ -1921,12 +2058,12 @@ public class Main extends Application {
             countdown.stop();
             copyToClipboard(password);
             icon.setText("✅");
-            title.setText("Passwort kopiert!");
-            domainLabel.setText("Füge es jetzt im Browser ein (Strg+V).");
+            title.setText(I18n.tr("Passwort kopiert!"));
+            domainLabel.setText(I18n.tr("Füge es jetzt im Browser ein (Strg+V)."));
             domainLabel.setStyle("-fx-text-fill: " + mainText + "; -fx-font-size: 14px;");
             stepBar.setProgress(0);
             root.getChildren().remove(stepBar);
-            mainBtn.setText("Fertig");
+            mainBtn.setText(I18n.tr("Fertig"));
             mainBtn.setOnAction(ev -> dialogStage.close());
             openOnlyBtn.setVisible(false);
             cleanupTimeline.stop();
@@ -1939,15 +2076,15 @@ public class Main extends Application {
             openUrl(url);
             copyToClipboard(username);
             icon.setText("①");
-            title.setText("Benutzername kopiert");
-            domainLabel.setText("Füge ihn jetzt im Login-Feld ein (Strg+V)...");
+            title.setText(I18n.tr("Benutzername kopiert"));
+            domainLabel.setText(I18n.tr("Füge ihn jetzt im Login-Feld ein (Strg+V)..."));
             domainLabel.setStyle("-fx-text-fill: " + mainText + "; -fx-font-size: 14px;");
             stepBar.setProgress(1.0);
             root.getChildren().add(3, stepBar);
 
-            mainBtn.setText("② Passwort jetzt kopieren");
+            mainBtn.setText(I18n.tr("② Passwort jetzt kopieren"));
             mainBtn.setOnAction(ev -> passwordStep.run());
-            openOnlyBtn.setText("Abbrechen");
+            openOnlyBtn.setText(I18n.tr("Abbrechen"));
             openOnlyBtn.setOnAction(ev -> dialogStage.close());
 
             final long start = System.currentTimeMillis();
