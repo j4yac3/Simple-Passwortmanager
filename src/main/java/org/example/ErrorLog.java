@@ -10,10 +10,14 @@ import java.time.LocalDateTime;
 public final class ErrorLog {
 
     private static File logFile() {
+        return new File(appDir(), "error.log");
+    }
+
+    public static File appDir() {
         String home = System.getProperty("user.home");
         File dir = new File(home, ".jm-passwortmanager");
         if (!dir.exists()) dir.mkdirs();
-        return new File(dir, "error.log");
+        return dir;
     }
 
     public static synchronized void write(String context, Throwable t) {
