@@ -39,3 +39,10 @@ build/
 .DS_Store
 # Passwortmanager Datenbanken ausschließen
 *.db
+# Build-Ausgaben und Installationspakete nicht committen
+dist/
+*.msi
+*.tar.gz
+*.zip
+*.jar
+!**/src/main/**/target/*.jar

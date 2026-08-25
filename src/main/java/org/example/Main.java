@@ -1,5 +1,6 @@
 package org.example;
 
+import javafx.animation.Animation;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
 import javafx.animation.TranslateTransition;
@@ -13,12 +14,15 @@ import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
+import javafx.scene.control.ProgressBar;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Slider;
 import javafx.scene.control.TextField;
 import javafx.scene.image.Image;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
+import javafx.scene.input.KeyEvent;
+import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -33,6 +37,7 @@ import javafx.util.Duration;
 
 import javax.crypto.Cipher;
 import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.PBEKeySpec;
 import javax.crypto.spec.SecretKeySpec;
@@ -48,14 +53,15 @@ public class Main extends Application {
     private final VBox entriesContainer = new VBox(14);
     private final VBox usersContainer = new VBox(10);
     private static final String DB_URL;
+    private static final java.io.File APP_DIR;
 
     static {
-        // Speichert die Datenbank sicher im Benutzerordner (z.B. C:\Users\DeinName\.jm-passwortmanager\)
         String userHome = System.getProperty("user.home");
         java.io.File appDir = new java.io.File(userHome, ".jm-passwortmanager");
         if (!appDir.exists()) {
             appDir.mkdirs();
         }
+        APP_DIR = appDir;
         DB_URL = "jdbc:sqlite:" + new java.io.File(appDir, "vault.db").getAbsolutePath();
     }
 
@@ -66,6 +72,8 @@ public class Main extends Application {
     private SecretKeySpec sessionKeySpec;
     private Stage primaryStage;
     private BorderPane mainLayout;
+    private Timeline autoLockTimer;
+    private long lastActivityMillis;
 
     private VBox sidebar;
     private Label menuTitle;
@@ -73,18 +81,26 @@ public class Main extends Application {
     private VBox inputForm;
     private TextField platformInput;
     private TextField urlInput;
+    private TextField totpInput;
     private TextField userInput;
     private TextField passwordInput;
     private Button generateBtn;
     private Region separator;
     private Button toggleSidebarBtn;
     private Button themeToggleBtn;
+    private Button logoutBtn;
     private Button addBtn;
     private Button addUserBtn;
 
-    private static final String ALGORITHM = "AES/CBC/PKCS5Padding";
-    private static final int ITERATIONS = 65536;
+    private static final String ALGORITHM_CBC = "AES/CBC/PKCS5Padding";
+    private static final String ALGORITHM_GCM = "AES/GCM/NoPadding";
+    private static final int GCM_IV_LENGTH = 12;
+    private static final int GCM_TAG_BITS = 128;
+    private static final int ITERATIONS = 600000;
+    private static final int LEGACY_ITERATIONS = 65536;
     private static final int KEY_LENGTH = 256;
+    private static final long AUTO_LOCK_AFTER_MS = 5 * 60 * 1000L;
+    private static final byte[] DPAPI_ENTROPY = "JM-Passwortmanager::SessionBinding::v1".getBytes(StandardCharsets.UTF_8);
 
     @Override
     public void start(Stage primaryStage) {
@@ -99,14 +115,16 @@ public class Main extends Application {
         } catch (Exception ignored) {}
 
         primaryStage.setTitle("JM Passwortmanager");
-        primaryStage.setResizable(true); // Flexibler gemacht
+        primaryStage.setResizable(true);
         primaryStage.setMinWidth(900);
         primaryStage.setMinHeight(600);
 
-        if (isAppInitialized()) {
-            showLoginScreen();
-        } else {
+        if (!isAppInitialized()) {
             showSetupScreen();
+        } else if (tryRestoreSession()) {
+            continueAfterUnlock();
+        } else {
+            showLoginScreen();
         }
     }
 
@@ -122,32 +140,37 @@ public class Main extends Application {
         styleAuthField(passConfirm);
 
         Button submitBtn = createAuthButton("Tresor initialisieren");
-        submitBtn.setOnAction(e -> {
-            String p1 = passInput.getText();
-            String p2 = passConfirm.getText();
-
-            if (p1 == null || p1.length() < 6) {
-                showAlert("Das Passwort muss mindestens 6 Zeichen lang sein.");
-                return;
-            }
-            if (!p1.equals(p2)) {
-                showAlert("Die Passwörter stimmen nicht überein.");
-                return;
-            }
-
-            try {
-                String recoveryCode = String.format("%06d", new SecureRandom().nextInt(1000000));
-                setupVaultSystem(p1, recoveryCode);
-                showRecoveryCodeScreen(recoveryCode, this::buildAndShowMainUI);
-            } catch (Exception ex) {
-                showAlert("Systemfehler bei der Initialisierung.");
-            }
-        });
+        submitBtn.setOnAction(e -> performSetup(passInput, passConfirm));
+        passInput.setOnAction(e -> passConfirm.requestFocus());
+        passConfirm.setOnAction(e -> submitBtn.fire());
 
         root.getChildren().addAll(passInput, passConfirm, submitBtn);
         primaryStage.setScene(new Scene(root, 1280, 720));
         primaryStage.show();
         primaryStage.centerOnScreen();
+    }
+
+    private void performSetup(PasswordField passInput, PasswordField passConfirm) {
+        String p1 = passInput.getText();
+        String p2 = passConfirm.getText();
+
+        String validationError = validateMasterPassword(p1);
+        if (validationError != null) {
+            showAlert(validationError);
+            return;
+        }
+        if (!p1.equals(p2)) {
+            showAlert("Die Passwörter stimmen nicht überein.");
+            return;
+        }
+
+        try {
+            String recoveryCode = generateStrongRecoveryCode();
+            setupVaultSystem(p1, recoveryCode);
+            showRecoveryCodeScreen(recoveryCode, this::buildAndShowMainUI);
+        } catch (Exception ex) {
+            showAlert("Systemfehler bei der Initialisierung.");
+        }
     }
 
     private void showLoginScreen() {
@@ -157,15 +180,13 @@ public class Main extends Application {
         passInput.setPromptText("Master-Passwort");
         styleAuthField(passInput);
 
+        CheckBox stayLoggedInBox = new CheckBox("Angemeldet bleiben");
+        stayLoggedInBox.setStyle("-fx-text-fill: #a1a1aa; -fx-font-size: 14px;");
+        stayLoggedInBox.setCursor(javafx.scene.Cursor.HAND);
+
         Button loginBtn = createAuthButton("Entsperren");
-        loginBtn.setOnAction(e -> {
-            if (tryUnlockWithPassword(passInput.getText())) {
-                buildAndShowMainUI();
-            } else {
-                showAlert("Falsches Master-Passwort!");
-                passInput.clear();
-            }
-        });
+        loginBtn.setOnAction(e -> performLogin(passInput, stayLoggedInBox));
+        passInput.setOnAction(e -> loginBtn.fire());
 
         Button forgotBtn = new Button("Passwort vergessen?");
         forgotBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: #a1a1aa; -fx-cursor: hand; -fx-underline: true;");
@@ -173,17 +194,28 @@ public class Main extends Application {
         forgotBtn.setOnMouseExited(e -> forgotBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: #a1a1aa; -fx-cursor: hand; -fx-underline: true;"));
         forgotBtn.setOnAction(e -> showRecoveryScreen());
 
-        root.getChildren().addAll(passInput, loginBtn, forgotBtn);
+        root.getChildren().addAll(passInput, stayLoggedInBox, loginBtn, forgotBtn);
         primaryStage.setScene(new Scene(root, 1280, 720));
         primaryStage.show();
         primaryStage.centerOnScreen();
     }
 
+    private void performLogin(PasswordField passInput, CheckBox stayLoggedInBox) {
+        if (tryUnlockWithPassword(passInput.getText())) {
+            if (stayLoggedInBox.isSelected()) savePersistentSession();
+            continueAfterUnlock();
+        } else {
+            showAlert("Falsches Master-Passwort!");
+            passInput.clear();
+            Platform.runLater(passInput::requestFocus);
+        }
+    }
+
     private void showRecoveryScreen() {
-        VBox root = createAuthLayout("Passwort zurücksetzen", "Gib deinen 6-stelligen Recovery-Code ein.");
+        VBox root = createAuthLayout("Passwort zurücksetzen", "Gib deinen Recovery-Code ein.");
 
         TextField codeInput = new TextField();
-        codeInput.setPromptText("6-stelliger Code");
+        codeInput.setPromptText("Recovery-Code");
         styleAuthField(codeInput);
 
         PasswordField newPassInput = new PasswordField();
@@ -191,22 +223,8 @@ public class Main extends Application {
         styleAuthField(newPassInput);
 
         Button resetBtn = createAuthButton("Passwort zurücksetzen");
-        resetBtn.setOnAction(e -> {
-            String code = codeInput.getText() != null ? codeInput.getText().trim() : "";
-            String newPass = newPassInput.getText() != null ? newPassInput.getText() : "";
-
-            if (newPass.length() < 6) {
-                showAlert("Das neue Passwort muss mindestens 6 Zeichen lang sein.");
-                return;
-            }
-
-            if (tryUnlockWithRecoveryCodeAndReset(code, newPass)) {
-                showAlert("Passwort erfolgreich zurückgesetzt!");
-                buildAndShowMainUI();
-            } else {
-                showAlert("Falscher oder ungültiger Recovery-Code.");
-            }
-        });
+        resetBtn.setOnAction(e -> performRecoveryReset(codeInput, newPassInput));
+        newPassInput.setOnAction(e -> resetBtn.fire());
 
         Button backBtn = new Button("Zurück zum Login");
         backBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: #a1a1aa; -fx-cursor: hand;");
@@ -216,11 +234,30 @@ public class Main extends Application {
         primaryStage.setScene(new Scene(root, 1280, 720));
     }
 
+    private void performRecoveryReset(TextField codeInput, PasswordField newPassInput) {
+        String code = codeInput.getText() != null ? codeInput.getText().trim() : "";
+        String newPass = newPassInput.getText() != null ? newPassInput.getText() : "";
+
+        String validationError = validateMasterPassword(newPass);
+        if (validationError != null) {
+            showAlert(validationError);
+            return;
+        }
+
+        if (tryUnlockWithRecoveryCodeAndReset(code, newPass)) {
+            continueAfterUnlock();
+        } else {
+            showAlert("Falscher oder ungültiger Recovery-Code.");
+            newPassInput.clear();
+            Platform.runLater(newPassInput::requestFocus);
+        }
+    }
+
     private void showRecoveryCodeScreen(String code, Runnable onComplete) {
-        VBox root = createAuthLayout("WICHTIG: Recovery-Code", "Speichere diesen 6-stelligen Code sicher ab!\nEr ist die einzige Möglichkeit, dein Passwort zurückzusetzen.");
+        VBox root = createAuthLayout("WICHTIG: Recovery-Code", "Speichere diesen Code sicher ab!\nEr ist die einzige Möglichkeit, dein Passwort zurückzusetzen.");
 
         Label codeLabel = new Label(code);
-        codeLabel.setStyle("-fx-font-size: 48px; -fx-font-weight: bold; -fx-text-fill: #10b981; -fx-letter-spacing: 5px;");
+        codeLabel.setStyle("-fx-font-size: 26px; -fx-font-weight: bold; -fx-text-fill: #10b981; -fx-letter-spacing: 3px;");
 
         Button copyBtn = new Button("Code kopieren");
         copyBtn.setStyle("-fx-background-color: #27272a; -fx-text-fill: white; -fx-padding: 10 20; -fx-background-radius: 8; -fx-cursor: hand;");
@@ -237,17 +274,59 @@ public class Main extends Application {
         primaryStage.setScene(new Scene(root, 1280, 720));
     }
 
+    private String validateMasterPassword(String password) {
+        if (password == null || password.length() < 12) {
+            return "Das Master-Passwort muss mindestens 12 Zeichen lang sein.";
+        }
+        if (!password.matches(".*[a-z].*") || !password.matches(".*[A-Z].*") || !password.matches(".*[0-9].*")) {
+            return "Das Passwort braucht Groß- und Kleinbuchstaben sowie mindestens eine Zahl.";
+        }
+        return null;
+    }
+
+    private String generateStrongRecoveryCode() {
+        String alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+        SecureRandom random = new SecureRandom();
+        StringBuilder code = new StringBuilder(28);
+        for (int i = 0; i < 28; i++) {
+            if (i > 0 && i % 7 == 0) code.append('-');
+            code.append(alphabet.charAt(random.nextInt(alphabet.length())));
+        }
+        return code.toString();
+    }
+
+    private void continueAfterUnlock() {
+        if (!"true".equals(getConfig("recovery_strong"))) {
+            try {
+                String newCode = generateStrongRecoveryCode();
+                byte[] newSalt = new byte[16];
+                new SecureRandom().nextBytes(newSalt);
+                byte[] kek = deriveKey(newCode, newSalt, ITERATIONS);
+                String enc = encryptBytes(sessionKeySpec.getEncoded(), new SecretKeySpec(kek, "AES"));
+                if (enc != null) {
+                    setConfig("salt_recovery", Base64.getEncoder().encodeToString(newSalt));
+                    setConfig("enc_vk_recovery", enc);
+                    setConfig("iter_recovery", String.valueOf(ITERATIONS));
+                    setConfig("recovery_strong", "true");
+                    showRecoveryCodeScreen(newCode, this::buildAndShowMainUI);
+                    return;
+                }
+            } catch (Exception ignored) {}
+        }
+        buildAndShowMainUI();
+    }
+
     private void setupVaultSystem(String password, String recoveryCode) throws Exception {
         byte[] vaultKey = new byte[32];
         new SecureRandom().nextBytes(vaultKey);
 
         byte[] saltPass = new byte[16];
         new SecureRandom().nextBytes(saltPass);
-        byte[] kekPass = deriveKey(password, saltPass);
+        byte[] kekPass = deriveKey(password, saltPass, ITERATIONS);
 
         byte[] saltRecovery = new byte[16];
         new SecureRandom().nextBytes(saltRecovery);
-        byte[] kekRecovery = deriveKey(recoveryCode, saltRecovery);
+        byte[] kekRecovery = deriveKey(recoveryCode, saltRecovery, ITERATIONS);
 
         String encryptedVaultKeyPass = encryptBytes(vaultKey, new SecretKeySpec(kekPass, "AES"));
         String encryptedVaultKeyRecovery = encryptBytes(vaultKey, new SecretKeySpec(kekRecovery, "AES"));
@@ -256,6 +335,9 @@ public class Main extends Application {
         setConfig("salt_recovery", Base64.getEncoder().encodeToString(saltRecovery));
         setConfig("enc_vk_pass", encryptedVaultKeyPass);
         setConfig("enc_vk_recovery", encryptedVaultKeyRecovery);
+        setConfig("iter_pass", String.valueOf(ITERATIONS));
+        setConfig("iter_recovery", String.valueOf(ITERATIONS));
+        setConfig("recovery_strong", "true");
         setConfig("initialized", "true");
 
         this.sessionKeySpec = new SecretKeySpec(vaultKey, "AES");
@@ -266,12 +348,14 @@ public class Main extends Application {
         try {
             byte[] saltPass = Base64.getDecoder().decode(getConfig("salt_pass"));
             String encVkPass = getConfig("enc_vk_pass");
+            int iterations = getIntConfig("iter_pass", LEGACY_ITERATIONS);
 
-            byte[] kekPass = deriveKey(password, saltPass);
+            byte[] kekPass = deriveKey(password, saltPass, iterations);
             byte[] vaultKey = decryptBytes(encVkPass, new SecretKeySpec(kekPass, "AES"));
 
             if (vaultKey != null) {
                 this.sessionKeySpec = new SecretKeySpec(vaultKey, "AES");
+                if (iterations < ITERATIONS) upgradeWrapping(password, "pass");
                 return true;
             }
         } catch (Exception e) { return false; }
@@ -283,38 +367,187 @@ public class Main extends Application {
         try {
             byte[] saltRecovery = Base64.getDecoder().decode(getConfig("salt_recovery"));
             String encVkRecovery = getConfig("enc_vk_recovery");
+            int iterations = getIntConfig("iter_recovery", LEGACY_ITERATIONS);
 
-            byte[] kekRecovery = deriveKey(code, saltRecovery);
+            byte[] kekRecovery = deriveKey(code, saltRecovery, iterations);
             byte[] vaultKey = decryptBytes(encVkRecovery, new SecretKeySpec(kekRecovery, "AES"));
 
             if (vaultKey == null) return false;
 
+            this.sessionKeySpec = new SecretKeySpec(vaultKey, "AES");
+
             byte[] newSaltPass = new byte[16];
             new SecureRandom().nextBytes(newSaltPass);
-            byte[] newKekPass = deriveKey(newPassword, newSaltPass);
+            byte[] newKekPass = deriveKey(newPassword, newSaltPass, ITERATIONS);
             String newEncVkPass = encryptBytes(vaultKey, new SecretKeySpec(newKekPass, "AES"));
 
             setConfig("salt_pass", Base64.getEncoder().encodeToString(newSaltPass));
             setConfig("enc_vk_pass", newEncVkPass);
+            setConfig("iter_pass", String.valueOf(ITERATIONS));
 
-            this.sessionKeySpec = new SecretKeySpec(vaultKey, "AES");
+            upgradeWrapping(code, "recovery");
             return true;
         } catch (Exception e) { return false; }
     }
 
-    private byte[] deriveKey(String password, byte[] salt) throws Exception {
-        KeySpec spec = new PBEKeySpec(password.toCharArray(), salt, ITERATIONS, KEY_LENGTH);
+    private void upgradeWrapping(String secretText, String kind) {
+        try {
+            byte[] newSalt = new byte[16];
+            new SecureRandom().nextBytes(newSalt);
+            byte[] kek = deriveKey(secretText, newSalt, ITERATIONS);
+            String enc = encryptBytes(sessionKeySpec.getEncoded(), new SecretKeySpec(kek, "AES"));
+            if (enc == null) return;
+            setConfig("salt_" + kind, Base64.getEncoder().encodeToString(newSalt));
+            setConfig("enc_vk_" + kind, enc);
+            setConfig("iter_" + kind, String.valueOf(ITERATIONS));
+        } catch (Exception ignored) {}
+    }
+
+    private int getIntConfig(String key, int defaultValue) {
+        try {
+            return Integer.parseInt(getConfig(key));
+        } catch (Exception e) {
+            return defaultValue;
+        }
+    }
+
+    private void savePersistentSession() {
+        if (sessionKeySpec == null) return;
+        try {
+            byte[] protectedKey = protectData(sessionKeySpec.getEncoded());
+            if (protectedKey != null) {
+                java.nio.file.Files.write(new java.io.File(APP_DIR, "session.key").toPath(),
+                        Base64.getEncoder().encodeToString(protectedKey).getBytes(StandardCharsets.UTF_8));
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private boolean tryRestoreSession() {
+        try {
+            java.io.File f = new java.io.File(APP_DIR, "session.key");
+            if (!f.exists()) return false;
+            byte[] raw = java.nio.file.Files.readAllBytes(f.toPath());
+            byte[] protectedKey = Base64.getDecoder().decode(new String(raw, StandardCharsets.UTF_8).trim());
+            byte[] vaultKey = unprotectData(protectedKey);
+            if (vaultKey != null && vaultKey.length == 32) {
+                this.sessionKeySpec = new SecretKeySpec(vaultKey, "AES");
+                return true;
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    private void clearPersistentSession() {
+        try (Connection conn = DriverManager.getConnection(DB_URL);
+             PreparedStatement pstmt = conn.prepareStatement("DELETE FROM config WHERE key = 'auto_login'")) {
+            pstmt.executeUpdate();
+        } catch (SQLException ignored) {}
+        try {
+            java.nio.file.Files.deleteIfExists(new java.io.File(APP_DIR, "session.key").toPath());
+        } catch (Exception ignored) {}
+    }
+
+    private byte[] getOrCreateMachineKey() throws Exception {
+        java.io.File f = new java.io.File(APP_DIR, "machine.key");
+        if (f.exists()) {
+            byte[] raw = java.nio.file.Files.readAllBytes(f.toPath());
+            return Base64.getDecoder().decode(new String(raw, StandardCharsets.UTF_8).trim());
+        }
+        byte[] key = new byte[32];
+        new SecureRandom().nextBytes(key);
+        java.nio.file.Files.write(f.toPath(), Base64.getEncoder().encodeToString(key).getBytes(StandardCharsets.UTF_8));
+        return key;
+    }
+
+    private byte[] protectData(byte[] data) {
+        try {
+            return com.sun.jna.platform.win32.Crypt32Util.cryptProtectData(data, DPAPI_ENTROPY, 0, null, null);
+        } catch (Throwable t) {
+            try {
+                byte[] machineKey = getOrCreateMachineKey();
+                String enc = encryptBytes(data, new SecretKeySpec(machineKey, "AES"));
+                return enc == null ? null : Base64.getDecoder().decode(enc);
+            } catch (Exception e) { return null; }
+        }
+    }
+
+    private byte[] unprotectData(byte[] blob) {
+        try {
+            return com.sun.jna.platform.win32.Crypt32Util.cryptUnprotectData(blob, DPAPI_ENTROPY, 0, null);
+        } catch (Throwable t) {
+            try {
+                byte[] machineKey = getOrCreateMachineKey();
+                return decryptBytes(Base64.getEncoder().encodeToString(blob), new SecretKeySpec(machineKey, "AES"));
+            } catch (Exception e) { return null; }
+        }
+    }
+
+    private void performLogout() {
+        stopAllTotpTimelines();
+        stopAutoLockTimer();
+        clearPersistentSession();
+        sessionKeySpec = null;
+        currentUser = "";
+        entriesContainer.getChildren().clear();
+        usersContainer.getChildren().clear();
+        showLoginScreen();
+    }
+
+    private void performLock() {
+        stopAllTotpTimelines();
+        stopAutoLockTimer();
+        sessionKeySpec = null;
+        currentUser = "";
+        entriesContainer.getChildren().clear();
+        usersContainer.getChildren().clear();
+        showLoginScreen();
+    }
+
+    private void startAutoLockTimer() {
+        stopAutoLockTimer();
+        lastActivityMillis = System.currentTimeMillis();
+        autoLockTimer = new Timeline(new KeyFrame(Duration.seconds(15), e -> {
+            Scene scene = primaryStage != null ? primaryStage.getScene() : null;
+            boolean mainUiShown = scene != null && scene.getRoot() == mainLayout;
+            if (mainUiShown && sessionKeySpec != null
+                    && System.currentTimeMillis() - lastActivityMillis > AUTO_LOCK_AFTER_MS) {
+                performLock();
+            }
+        }));
+        autoLockTimer.setCycleCount(Animation.INDEFINITE);
+        autoLockTimer.play();
+    }
+
+    private void stopAutoLockTimer() {
+        if (autoLockTimer != null) {
+            autoLockTimer.stop();
+            autoLockTimer = null;
+        }
+    }
+
+    private void stopTotpTimeline(StackPane card) {
+        if (card.getUserData() instanceof Timeline tl) tl.stop();
+    }
+
+    private void stopAllTotpTimelines() {
+        for (Node node : entriesContainer.getChildren()) {
+            if (node instanceof StackPane card) stopTotpTimeline(card);
+        }
+    }
+
+    private byte[] deriveKey(String password, byte[] salt, int iterations) throws Exception {
+        KeySpec spec = new PBEKeySpec(password.toCharArray(), salt, iterations, KEY_LENGTH);
         SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
         return factory.generateSecret(spec).getEncoded();
     }
 
     private String encryptBytes(byte[] data, SecretKeySpec key) {
-        if (data == null) return null;
+        if (data == null || key == null) return null;
         try {
-            byte[] iv = new byte[16];
+            byte[] iv = new byte[GCM_IV_LENGTH];
             new SecureRandom().nextBytes(iv);
-            Cipher cipher = Cipher.getInstance(ALGORITHM);
-            cipher.init(Cipher.ENCRYPT_MODE, key, new IvParameterSpec(iv));
+            Cipher cipher = Cipher.getInstance(ALGORITHM_GCM);
+            cipher.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(GCM_TAG_BITS, iv));
             byte[] enc = cipher.doFinal(data);
             byte[] combined = new byte[iv.length + enc.length];
             System.arraycopy(iv, 0, combined, 0, iv.length);
@@ -324,18 +557,26 @@ public class Main extends Application {
     }
 
     private byte[] decryptBytes(String dataBase64, SecretKeySpec key) {
-        if (dataBase64 == null || dataBase64.isEmpty()) return null;
+        if (dataBase64 == null || dataBase64.isEmpty() || key == null) return null;
         try {
             byte[] combined = Base64.getDecoder().decode(dataBase64);
-            byte[] iv = new byte[16];
-            System.arraycopy(combined, 0, iv, 0, iv.length);
-            byte[] enc = new byte[combined.length - iv.length];
-            System.arraycopy(combined, iv.length, enc, 0, enc.length);
-
-            Cipher cipher = Cipher.getInstance(ALGORITHM);
-            cipher.init(Cipher.DECRYPT_MODE, key, new IvParameterSpec(iv));
-            return cipher.doFinal(enc);
+            if (combined.length > GCM_IV_LENGTH) {
+                try {
+                    GCMParameterSpec gcmSpec = new GCMParameterSpec(GCM_TAG_BITS, combined, 0, GCM_IV_LENGTH);
+                    Cipher gcm = Cipher.getInstance(ALGORITHM_GCM);
+                    gcm.init(Cipher.DECRYPT_MODE, key, gcmSpec);
+                    return gcm.doFinal(combined, GCM_IV_LENGTH, combined.length - GCM_IV_LENGTH);
+                } catch (Exception ignored) {}
+            }
+            int cbcIvLength = 16;
+            if (combined.length > cbcIvLength) {
+                IvParameterSpec ivSpec = new IvParameterSpec(combined, 0, cbcIvLength);
+                Cipher cbc = Cipher.getInstance(ALGORITHM_CBC);
+                cbc.init(Cipher.DECRYPT_MODE, key, ivSpec);
+                return cbc.doFinal(combined, cbcIvLength, combined.length - cbcIvLength);
+            }
         } catch (Exception e) { return null; }
+        return null;
     }
 
     private void buildAndShowMainUI() {
@@ -388,12 +629,19 @@ public class Main extends Application {
             applyTheme();
         });
 
-        topHeader.getChildren().addAll(toggleSidebarBtn, iconLabel, titleLabel, topSpacer, themeToggleBtn);
+        logoutBtn = new Button("⏻");
+        logoutBtn.setMinSize(40, 40);
+        logoutBtn.setPrefSize(40, 40);
+        logoutBtn.setPadding(new Insets(0));
+        logoutBtn.setOnAction(e -> performLogout());
+
+        topHeader.getChildren().addAll(toggleSidebarBtn, iconLabel, titleLabel, topSpacer, themeToggleBtn, logoutBtn);
 
         inputForm = new VBox(14);
         inputForm.setPadding(new Insets(24));
         platformInput = createStyledTextField("Plattform (z.B. Google, GitHub)");
         urlInput = createStyledTextField("Website-Link (z.B. https://github.com) - Optional");
+        totpInput = createStyledTextField("2FA-Secret (TOTP/Base32, optional)");
         userInput = createStyledTextField("Benutzername / E-Mail");
 
         HBox passwordBox = new HBox(10);
@@ -417,16 +665,25 @@ public class Main extends Application {
 
             String platform = platformInput.getText() != null ? platformInput.getText().trim() : "";
             String url = urlInput.getText() != null ? urlInput.getText().trim() : "";
+            String totp = TotpUtil.normalize(totpInput.getText());
             String user = userInput.getText() != null ? userInput.getText().trim() : "";
             String pass = passwordInput.getText() != null ? passwordInput.getText().trim() : "";
 
+            if (!totp.isEmpty() && !TotpUtil.isPlausible(totp)) {
+                showAlert("Das 2FA-Secret ist ungültig.\nErlaubt ist ein Base32-Secret oder ein otpauth://-Link.");
+                totpInput.requestFocus();
+                return;
+            }
+
             if (!platform.isEmpty() && !user.isEmpty() && !pass.isEmpty()) {
-                int id = saveToDatabase(currentUser, platform, url, user, pass);
+                int id = saveToDatabase(currentUser, platform, url, user, pass, totp);
                 if (id != -1) {
-                    StackPane newCard = createSwipeableCard(id, platform, url, user, pass);
+                    StackPane newCard = createSwipeableCard(id, platform, url, user, pass, totp);
                     entriesContainer.getChildren().add(0, newCard);
+                    refreshEmptyEntriesHint();
                     platformInput.clear();
                     urlInput.clear();
+                    totpInput.clear();
                     userInput.clear();
                     passwordInput.clear();
                 }
@@ -435,7 +692,13 @@ public class Main extends Application {
             }
         });
 
-        inputForm.getChildren().addAll(platformInput, urlInput, userInput, passwordBox, addBtn);
+        inputForm.getChildren().addAll(platformInput, urlInput, totpInput, userInput, passwordBox, addBtn);
+
+        platformInput.setOnAction(e -> urlInput.requestFocus());
+        urlInput.setOnAction(e -> totpInput.requestFocus());
+        totpInput.setOnAction(e -> userInput.requestFocus());
+        userInput.setOnAction(e -> passwordInput.requestFocus());
+        passwordInput.setOnAction(e -> addBtn.fire());
         separator = new Region();
         separator.setPrefHeight(1);
 
@@ -452,7 +715,10 @@ public class Main extends Application {
         applyTheme();
 
         Scene mainScene = new Scene(mainLayout, 1280, 720);
+        mainScene.addEventFilter(MouseEvent.ANY, e -> lastActivityMillis = System.currentTimeMillis());
+        mainScene.addEventFilter(KeyEvent.ANY, e -> lastActivityMillis = System.currentTimeMillis());
         primaryStage.setScene(mainScene);
+        startAutoLockTimer();
     }
 
     private void applyTheme() {
@@ -488,6 +754,13 @@ public class Main extends Application {
                 "-fx-background-color: #e4e4e7; -fx-text-fill: #4b5563; -fx-font-size: 15px; -fx-background-radius: 50em; -fx-cursor: hand; -fx-border-color: #d4d4d8; -fx-border-radius: 50em;"
         );
 
+        applyButtonStyle(logoutBtn,
+                "-fx-background-color: #18181b; -fx-text-fill: #f87171; -fx-font-size: 16px; -fx-background-radius: 50em; -fx-cursor: hand; -fx-border-color: #27272a; -fx-border-radius: 50em;",
+                "-fx-background-color: #27272a; -fx-text-fill: #ef4444; -fx-font-size: 16px; -fx-background-radius: 50em; -fx-cursor: hand; -fx-border-color: #3f3f46; -fx-border-radius: 50em;",
+                "-fx-background-color: #ffffff; -fx-text-fill: #dc2626; -fx-font-size: 16px; -fx-background-radius: 50em; -fx-cursor: hand; -fx-border-color: #e4e4e7; -fx-border-radius: 50em;",
+                "-fx-background-color: #fee2e2; -fx-text-fill: #b91c1c; -fx-font-size: 16px; -fx-background-radius: 50em; -fx-cursor: hand; -fx-border-color: #fecaca; -fx-border-radius: 50em;"
+        );
+
         applyButtonStyle(generateBtn,
                 "-fx-background-color: #18181b; -fx-text-fill: #a1a1aa; -fx-font-size: 20px; -fx-background-radius: 12px; -fx-cursor: hand; -fx-border-color: #27272a; -fx-border-radius: 12px;",
                 "-fx-background-color: #27272a; -fx-text-fill: #ffffff; -fx-font-size: 20px; -fx-background-radius: 12px; -fx-cursor: hand; -fx-border-color: #3f3f46; -fx-border-radius: 12px;",
@@ -512,12 +785,14 @@ public class Main extends Application {
 
         platformInput.setDisable(noUser);
         urlInput.setDisable(noUser);
+        totpInput.setDisable(noUser);
         userInput.setDisable(noUser);
         passwordInput.setDisable(noUser);
         generateBtn.setDisable(noUser);
 
         updateTextFieldStyleImmediate(platformInput);
         updateTextFieldStyleImmediate(urlInput);
+        updateTextFieldStyleImmediate(totpInput);
         updateTextFieldStyleImmediate(userInput);
         updateTextFieldStyleImmediate(passwordInput);
 
@@ -570,6 +845,12 @@ public class Main extends Application {
                 "-fx-background-color: #27272a; -fx-text-fill: #fbbf24; -fx-font-size: 15px; -fx-background-radius: 50em; -fx-cursor: hand; -fx-border-color: #3f3f46; -fx-border-radius: 50em;",
                 "-fx-background-color: #ffffff; -fx-text-fill: #4b5563; -fx-font-size: 15px; -fx-background-radius: 50em; -fx-cursor: hand; -fx-border-color: #e4e4e7; -fx-border-radius: 50em;",
                 "-fx-background-color: #e4e4e7; -fx-text-fill: #4b5563; -fx-font-size: 15px; -fx-background-radius: 50em; -fx-cursor: hand; -fx-border-color: #d4d4d8; -fx-border-radius: 50em;"
+        );
+        setupIndividualButtonHover(logoutBtn,
+                "-fx-background-color: #18181b; -fx-text-fill: #f87171; -fx-font-size: 16px; -fx-background-radius: 50em; -fx-cursor: hand; -fx-border-color: #27272a; -fx-border-radius: 50em;",
+                "-fx-background-color: #27272a; -fx-text-fill: #ef4444; -fx-font-size: 16px; -fx-background-radius: 50em; -fx-cursor: hand; -fx-border-color: #3f3f46; -fx-border-radius: 50em;",
+                "-fx-background-color: #ffffff; -fx-text-fill: #dc2626; -fx-font-size: 16px; -fx-background-radius: 50em; -fx-cursor: hand; -fx-border-color: #e4e4e7; -fx-border-radius: 50em;",
+                "-fx-background-color: #fee2e2; -fx-text-fill: #b91c1c; -fx-font-size: 16px; -fx-background-radius: 50em; -fx-cursor: hand; -fx-border-color: #fecaca; -fx-border-radius: 50em;"
         );
         setupIndividualButtonHover(generateBtn,
                 "-fx-background-color: #18181b; -fx-text-fill: #a1a1aa; -fx-font-size: 20px; -fx-background-radius: 12px; -fx-cursor: hand; -fx-border-color: #27272a; -fx-border-radius: 12px;",
@@ -698,6 +979,22 @@ public class Main extends Application {
                 Button eyeBtn = (Button) passBox.getChildren().get(1);
                 eyeBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: " + subtitleText + "; -fx-cursor: hand; -fx-font-size: 13px;");
 
+                if (textContainer.getChildren().size() > 3 && textContainer.getChildren().get(3) instanceof HBox totpRow) {
+                    for (Node rowNode : totpRow.getChildren()) {
+                        if (rowNode instanceof Label lbl) {
+                            if ("totpCode".equals(lbl.getId())) {
+                                lbl.setStyle("-fx-text-fill: " + titleText + "; -fx-font-weight: bold; -fx-font-size: 15px; -fx-font-family: 'Consolas', 'Courier New', monospace; -fx-letter-spacing: 2px;");
+                            } else {
+                                lbl.setStyle("-fx-text-fill: " + subtitleText + "; -fx-font-size: " + (lbl.getText().endsWith("s") ? "12px;" : "13px;"));
+                            }
+                        } else if (rowNode instanceof ProgressBar pb) {
+                            pb.setStyle("-fx-accent: " + btnBgNormal + ";");
+                        } else if (rowNode instanceof Button b) {
+                            b.setStyle("-fx-background-color: transparent; -fx-text-fill: " + subtitleText + "; -fx-cursor: hand; -fx-font-size: 13px;");
+                        }
+                    }
+                }
+
                 HBox buttonBox = (HBox) frontLayer.getChildren().get(2);
                 for (Node btnNode : buttonBox.getChildren()) {
                     if (btnNode instanceof Button) {
@@ -713,7 +1010,6 @@ public class Main extends Application {
         }
     }
 
-    // --- Hilfsmethode für sicheres Kopieren (Auto-Clear nach 15 Sekunden) ---
     private void copyToClipboard(String text) {
         if(text == null) return;
         Clipboard clipboard = Clipboard.getSystemClipboard();
@@ -721,7 +1017,6 @@ public class Main extends Application {
         content.putString(text);
         clipboard.setContent(content);
 
-        // Sicherheitsfeature: Clipboard nach 15 Sekunden löschen
         Timeline timeline = new Timeline(new KeyFrame(Duration.seconds(15), evt -> {
             if (clipboard.hasString() && clipboard.getString().equals(text)) {
                 clipboard.clear();
@@ -733,7 +1028,7 @@ public class Main extends Application {
 
     private void showPasswordGeneratorDialog(TextField targetField) {
         Stage dialogStage = new Stage();
-        dialogStage.initOwner(primaryStage); // Verhindert Bugs bei Multimonitor/Resizing
+        dialogStage.initOwner(primaryStage);
         dialogStage.initModality(Modality.APPLICATION_MODAL);
         dialogStage.initStyle(StageStyle.TRANSPARENT);
 
@@ -1029,13 +1324,12 @@ public class Main extends Application {
         dialogStage.showAndWait();
     }
 
-    private void showEditDialog(int id, String oldPlat, String oldUrl, String oldUser, String oldPass) {
+    private void showEditDialog(int id, String oldPlat, String oldUrl, String oldUser, String oldPass, String oldTotp) {
         Stage dialogStage = new Stage();
         dialogStage.initOwner(primaryStage);
         dialogStage.initModality(Modality.APPLICATION_MODAL);
         dialogStage.initStyle(StageStyle.TRANSPARENT);
 
-        // Dynamische Höhe durch Region.USE_COMPUTED_SIZE
         VBox root = new VBox(0);
         root.setPrefWidth(420);
         root.setMinHeight(Region.USE_PREF_SIZE);
@@ -1062,6 +1356,9 @@ public class Main extends Application {
         TextField urlField = createStyledTextField("URL (Optional)");
         urlField.setText(oldUrl);
 
+        TextField totpField = createStyledTextField("2FA-Secret (TOTP/Base32, optional)");
+        totpField.setText(oldTotp);
+
         TextField userField = createStyledTextField("Benutzername");
         userField.setText(oldUser);
 
@@ -1082,11 +1379,16 @@ public class Main extends Application {
         genBtn.setOnAction(e -> showPasswordGeneratorDialog(passField));
         passBox.getChildren().addAll(passField, genBtn);
 
-        formBox.getChildren().addAll(platField, urlField, userField, passBox);
+        formBox.getChildren().addAll(platField, urlField, totpField, userField, passBox);
+
+        platField.setOnAction(e -> urlField.requestFocus());
+        urlField.setOnAction(e -> totpField.requestFocus());
+        totpField.setOnAction(e -> userField.requestFocus());
+        userField.setOnAction(e -> passField.requestFocus());
 
         ScrollPane scrollPane = new ScrollPane(formBox);
         scrollPane.setFitToWidth(true);
-        // Style angepasst für den Edit-Dialog (keine abgerundeten Ecken am Scrollpane selbst nötig)
+
         scrollPane.setStyle("-fx-background: transparent; -fx-background-color: transparent; -fx-control-inner-background: transparent;");
         scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
         scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
@@ -1115,11 +1417,20 @@ public class Main extends Application {
         saveBtn.setOnAction(e -> {
             String p = platField.getText() != null ? platField.getText().trim() : "";
             String u = urlField.getText() != null ? urlField.getText().trim() : "";
+            String tf = TotpUtil.normalize(totpField.getText());
+
+            if (!tf.isEmpty() && !TotpUtil.isPlausible(tf)) {
+                showAlert("Das 2FA-Secret ist ungültig.\nErlaubt ist ein Base32-Secret oder ein otpauth://-Link.");
+                totpField.requestFocus();
+                return;
+            }
+
             String n = userField.getText() != null ? userField.getText().trim() : "";
             String pw = passField.getText() != null ? passField.getText().trim() : "";
 
             if (!p.isEmpty() && !n.isEmpty() && !pw.isEmpty()) {
-                updateInDatabase(id, p, u, n, pw);
+                updateInDatabase(id, p, u, n, pw, tf);
+                stopAllTotpTimelines();
                 entriesContainer.getChildren().clear();
                 loadEntriesFromDatabase();
                 dialogStage.close();
@@ -1137,6 +1448,84 @@ public class Main extends Application {
 
         Platform.runLater(platField::requestFocus);
         dialogStage.showAndWait();
+    }
+
+    private boolean showConfirmDialog(String title, String message, String confirmText) {
+        final boolean[] confirmed = {false};
+        Stage dialogStage = new Stage();
+        dialogStage.initOwner(primaryStage);
+        dialogStage.initModality(Modality.APPLICATION_MODAL);
+        dialogStage.initStyle(StageStyle.TRANSPARENT);
+
+        VBox root = new VBox(15);
+        root.setPadding(new Insets(24));
+        root.setPrefWidth(360);
+
+        String dropShadow = isDarkMode ? "rgba(0,0,0,0.6)" : "rgba(0,0,0,0.15)";
+        String mainText = isDarkMode ? "#ffffff" : "#09090b";
+        String subText = isDarkMode ? "#a1a1aa" : "#71717a";
+        String borderColor = isDarkMode ? "#fbbf24" : "#d97706";
+        root.setStyle("-fx-background-color: " + (isDarkMode ? "#18181b" : "#ffffff") + "; -fx-border-color: " + borderColor + "; -fx-border-width: 1px; -fx-border-radius: 16px; -fx-background-radius: 16px; -fx-effect: dropshadow(three-pass-box, " + dropShadow + ", 25, 0, 0, 10);");
+
+        HBox header = new HBox(10);
+        header.setAlignment(Pos.CENTER_LEFT);
+        Label icon = new Label("⚠️");
+        icon.setStyle("-fx-font-size: 20px;");
+        Label titleLabel = new Label(title);
+        titleLabel.setStyle("-fx-text-fill: " + mainText + "; -fx-font-size: 18px; -fx-font-weight: bold;");
+        header.getChildren().addAll(icon, titleLabel);
+
+        Label msgLabel = new Label(message);
+        msgLabel.setWrapText(true);
+        msgLabel.setStyle("-fx-text-fill: " + subText + "; -fx-font-size: 14px;");
+
+        Button confirmBtn = new Button(confirmText);
+        confirmBtn.setStyle("-fx-background-color: #ef4444; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 8px 16px;");
+        confirmBtn.setOnMouseEntered(e -> confirmBtn.setStyle("-fx-background-color: #dc2626; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 8px 16px;"));
+        confirmBtn.setOnMouseExited(e -> confirmBtn.setStyle("-fx-background-color: #ef4444; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 8px 16px;"));
+        confirmBtn.setOnAction(e -> {
+            confirmed[0] = true;
+            dialogStage.close();
+        });
+
+        Button cancelBtn = new Button("Abbrechen");
+        String cancelNormal = "-fx-background-color: transparent; -fx-text-fill: " + subText + "; -fx-font-weight: bold; -fx-cursor: hand; -fx-padding: 8px 16px;";
+        String cancelHover = "-fx-background-color: " + (isDarkMode ? "#27272a" : "#e4e4e7") + "; -fx-text-fill: " + mainText + "; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 8px 16px;";
+        cancelBtn.setStyle(cancelNormal);
+        cancelBtn.setOnMouseEntered(e -> cancelBtn.setStyle(cancelHover));
+        cancelBtn.setOnMouseExited(e -> cancelBtn.setStyle(cancelNormal));
+        cancelBtn.setOnAction(e -> dialogStage.close());
+
+        HBox btnBox = new HBox(10);
+        btnBox.setAlignment(Pos.CENTER_RIGHT);
+        btnBox.getChildren().addAll(cancelBtn, confirmBtn);
+
+        root.getChildren().addAll(header, msgLabel, btnBox);
+
+        Scene scene = new Scene(root);
+        scene.setFill(Color.TRANSPARENT);
+        dialogStage.setScene(scene);
+        Platform.runLater(confirmBtn::requestFocus);
+        dialogStage.showAndWait();
+        return confirmed[0];
+    }
+
+    private void refreshEmptyEntriesHint() {
+        entriesContainer.getChildren().removeIf(n -> n instanceof Label l && "emptyHint".equals(l.getId()));
+        if (currentUser == null || currentUser.isEmpty()) return;
+        boolean hasEntries = false;
+        for (Node n : entriesContainer.getChildren()) {
+            if (n instanceof StackPane) {
+                hasEntries = true;
+                break;
+            }
+        }
+        if (hasEntries) return;
+        Label hint = new Label("Noch keine Einträge für \"" + currentUser + "\".\nFüge oben deinen ersten Eintrag hinzu.");
+        hint.setId("emptyHint");
+        hint.setWrapText(true);
+        hint.setStyle("-fx-text-fill: " + (isDarkMode ? "#52525b" : "#a1a1aa") + "; -fx-font-size: 14px; -fx-text-alignment: center; -fx-padding: 30px;");
+        entriesContainer.getChildren().add(hint);
     }
 
     private void showAlert(String message) {
@@ -1257,6 +1646,11 @@ public class Main extends Application {
         });
 
         deleteBtn.setOnAction(e -> {
+            if (!showConfirmDialog("Konto löschen?", "\"" + name + "\" und ALLE zugehörigen Einträge wirklich löschen?\nDas kann nicht rückgängig gemacht werden.", "Alles löschen")) {
+                loadUsersFromDatabase();
+                updateFormState();
+                return;
+            }
             deleteUserFromDatabase(name);
             loadUsersFromDatabase();
             updateFormState();
@@ -1273,7 +1667,7 @@ public class Main extends Application {
         loadEntriesFromDatabase();
     }
 
-    private StackPane createSwipeableCard(int id, String platform, String url, String username, String passwordToCopy) {
+    private StackPane createSwipeableCard(int id, String platform, String url, String username, String passwordToCopy, String totpSecret) {
         StackPane container = new StackPane();
 
         HBox backLayer = new HBox();
@@ -1321,6 +1715,47 @@ public class Main extends Application {
 
         textContainer.getChildren().addAll(platformLabel, userLabel, passBox);
 
+        if (totpSecret != null && TotpUtil.isPlausible(totpSecret)) {
+            String accentColor = isDarkMode ? "#4f46e5" : "#6366f1";
+
+            Label totpBadge = new Label("🔐 2FA:");
+            totpBadge.setStyle("-fx-text-fill: " + subtitleText + "; -fx-font-size: 13px;");
+
+            Label codeLabel = new Label("••• •••");
+            codeLabel.setId("totpCode");
+            codeLabel.setStyle("-fx-text-fill: " + titleText + "; -fx-font-weight: bold; -fx-font-size: 15px; -fx-font-family: 'Consolas', 'Courier New', monospace; -fx-letter-spacing: 2px;");
+
+            ProgressBar ring = new ProgressBar(1.0);
+            ring.setPrefSize(70, 8);
+            ring.setStyle("-fx-accent: " + accentColor + ";");
+
+            Label secsLabel = new Label("30s");
+            secsLabel.setStyle("-fx-text-fill: " + subtitleText + "; -fx-font-size: 12px;");
+
+            Button copyCodeBtn = new Button("📋");
+            copyCodeBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: " + subtitleText + "; -fx-cursor: hand; -fx-font-size: 13px;");
+            copyCodeBtn.setOnAction(ev -> copyToClipboard(TotpUtil.currentCode(totpSecret)));
+
+            HBox totpRow = new HBox(8);
+            totpRow.setAlignment(Pos.CENTER_LEFT);
+            totpRow.getChildren().addAll(totpBadge, codeLabel, ring, secsLabel, copyCodeBtn);
+            textContainer.getChildren().add(totpRow);
+
+            Timeline ticker = new Timeline(new KeyFrame(Duration.seconds(0.5), ev -> {
+                long epoch = System.currentTimeMillis() / 1000L;
+                long remain = 30 - (epoch % 30);
+                String code = TotpUtil.generate(totpSecret, epoch);
+                if (!code.isEmpty()) {
+                    codeLabel.setText(code.substring(0, 3) + " " + code.substring(3));
+                }
+                secsLabel.setText(remain + "s");
+                ring.setProgress(remain / 30.0);
+            }));
+            ticker.setCycleCount(Animation.INDEFINITE);
+            ticker.play();
+            container.setUserData(ticker);
+        }
+
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
@@ -1336,9 +1771,18 @@ public class Main extends Application {
         editBtn.setOnMouseEntered(e -> editBtn.setStyle("-fx-background-color: " + utilityBtnHover + "; -fx-text-fill: " + utilityBtnText + "; -fx-background-radius: 8px; -fx-padding: 8px 12px; -fx-cursor: hand; -fx-font-size: 13px;"));
         editBtn.setOnMouseExited(e -> editBtn.setStyle("-fx-background-color: " + utilityBtnBg + "; -fx-text-fill: " + utilityBtnText + "; -fx-background-radius: 8px; -fx-padding: 8px 12px; -fx-cursor: hand; -fx-font-size: 13px;"));
         editBtn.setOnAction(e -> {
-            showPasswordPromptForEdit(() -> showEditDialog(id, platform, url, username, passwordToCopy));
+            showPasswordPromptForEdit(() -> showEditDialog(id, platform, url, username, passwordToCopy, totpSecret));
         });
         actionButtons.getChildren().add(editBtn);
+
+        if (username != null && !username.isEmpty()) {
+            Button userCopyBtn = new Button("👤");
+            userCopyBtn.setStyle("-fx-background-color: " + utilityBtnBg + "; -fx-text-fill: " + utilityBtnText + "; -fx-background-radius: 8px; -fx-padding: 8px 12px; -fx-cursor: hand; -fx-font-size: 13px;");
+            userCopyBtn.setOnMouseEntered(e -> userCopyBtn.setStyle("-fx-background-color: " + utilityBtnHover + "; -fx-text-fill: " + utilityBtnText + "; -fx-background-radius: 8px; -fx-padding: 8px 12px; -fx-cursor: hand; -fx-font-size: 13px;"));
+            userCopyBtn.setOnMouseExited(e -> userCopyBtn.setStyle("-fx-background-color: " + utilityBtnBg + "; -fx-text-fill: " + utilityBtnText + "; -fx-background-radius: 8px; -fx-padding: 8px 12px; -fx-cursor: hand; -fx-font-size: 13px;"));
+            userCopyBtn.setOnAction(ev -> copyToClipboard(username));
+            actionButtons.getChildren().add(userCopyBtn);
+        }
 
         if (url != null && !url.trim().isEmpty()) {
             Button linkBtn = new Button("🌍");
@@ -1346,13 +1790,9 @@ public class Main extends Application {
             linkBtn.setOnMouseEntered(e -> linkBtn.setStyle("-fx-background-color: " + utilityBtnHover + "; -fx-text-fill: " + utilityBtnText + "; -fx-background-radius: 8px; -fx-padding: 8px 12px; -fx-cursor: hand; -fx-font-size: 13px;"));
             linkBtn.setOnMouseExited(e -> linkBtn.setStyle("-fx-background-color: " + utilityBtnBg + "; -fx-text-fill: " + utilityBtnText + "; -fx-background-radius: 8px; -fx-padding: 8px 12px; -fx-cursor: hand; -fx-font-size: 13px;"));
             linkBtn.setOnAction(e -> {
-                try {
-                    String finalUrl = url.trim();
-                    if (!finalUrl.startsWith("http://") && !finalUrl.startsWith("https://")) {
-                        finalUrl = "https://" + finalUrl;
-                    }
-                    getHostServices().showDocument(finalUrl);
-                } catch (Exception ex) {
+                if (username != null && !username.isEmpty() && passwordToCopy != null && !passwordToCopy.isEmpty()) {
+                    showQuickLoginDialog(platform, url, username, passwordToCopy);
+                } else if (!openUrl(url)) {
                     showAlert("Der Link konnte nicht im Browser geöffnet werden.");
                 }
             });
@@ -1376,7 +1816,6 @@ public class Main extends Application {
             copyBtn.setText("✓ Kopiert!");
             copyBtn.setStyle("-fx-background-color: #10b981; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-padding: 8px 16px; -fx-font-size: 13px;");
 
-            // Setzt den Button-Text nach 3 Sekunden optisch wieder zurück
             Timeline resetTextTimeline = new Timeline(new KeyFrame(Duration.seconds(3), evt -> {
                 copyBtn.setText("📋 Kopieren");
                 copyBtn.setStyle("-fx-background-color: " + copyBtnNormal + "; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-padding: 8px 16px; -fx-cursor: hand; -fx-font-size: 13px;");
@@ -1409,11 +1848,155 @@ public class Main extends Application {
         });
 
         deleteBtn.setOnAction(e -> {
+            if (!showConfirmDialog("Eintrag löschen?", "\"" + (platform != null ? platform : "Unbekannt") + "\" wirklich löschen?\nDas kann nicht rückgängig gemacht werden.", "Löschen")) return;
+            stopTotpTimeline(container);
             deleteFromDatabase(id);
             entriesContainer.getChildren().remove(container);
+            refreshEmptyEntriesHint();
         });
 
         return container;
+    }
+
+    private void showQuickLoginDialog(String platform, String url, String username, String password) {
+        Stage dialogStage = new Stage();
+        dialogStage.initOwner(primaryStage);
+        dialogStage.initModality(Modality.APPLICATION_MODAL);
+        dialogStage.initStyle(StageStyle.TRANSPARENT);
+
+        VBox root = new VBox(14);
+        root.setPadding(new Insets(24));
+        root.setPrefWidth(400);
+
+        String dropShadow = isDarkMode ? "rgba(0,0,0,0.6)" : "rgba(0,0,0,0.15)";
+        String cardBg = isDarkMode ? "#18181b" : "#ffffff";
+        String cardBorder = isDarkMode ? "#3f3f46" : "#e4e4e7";
+        String mainText = isDarkMode ? "#ffffff" : "#09090b";
+        String subText = isDarkMode ? "#a1a1aa" : "#71717a";
+        root.setStyle("-fx-background-color: " + cardBg + "; -fx-border-color: " + cardBorder + "; -fx-border-width: 1px; -fx-border-radius: 16px; -fx-background-radius: 16px; -fx-effect: dropshadow(three-pass-box, " + dropShadow + ", 25, 0, 0, 10);");
+
+        Label icon = new Label("🌐");
+        icon.setStyle("-fx-font-size: 34px;");
+
+        Label title = new Label("Website erkannt");
+        title.setStyle("-fx-text-fill: " + mainText + "; -fx-font-size: 20px; -fx-font-weight: bold;");
+
+        String domain = extractDomain(url);
+        Label domainLabel = new Label(domain.isEmpty() ? platform : domain);
+        domainLabel.setWrapText(true);
+        domainLabel.setStyle("-fx-text-fill: #6366f1; -fx-font-size: 15px; -fx-font-weight: bold;");
+
+        Label userLabel = new Label(username);
+        userLabel.setWrapText(true);
+        userLabel.setStyle("-fx-text-fill: " + subText + "; -fx-font-size: 13px;");
+
+        ProgressBar stepBar = new ProgressBar(0);
+        stepBar.setPrefWidth(Double.MAX_VALUE);
+        stepBar.setStyle("-fx-accent: #10b981;");
+
+        Button loginBtn = new Button("🚀 Automatisch einloggen");
+        loginBtn.setMaxWidth(Double.MAX_VALUE);
+        loginBtn.setStyle("-fx-background-color: #10b981; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 12px; -fx-font-size: 14px;");
+        loginBtn.setOnMouseEntered(e -> loginBtn.setStyle("-fx-background-color: #059669; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 12px; -fx-font-size: 14px;"));
+        loginBtn.setOnMouseExited(e -> loginBtn.setStyle("-fx-background-color: #10b981; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 12px; -fx-font-size: 14px;"));
+
+        Button openOnlyBtn = new Button("Nur Website öffnen");
+        openOnlyBtn.setMaxWidth(Double.MAX_VALUE);
+        String openOnlyNormal = "-fx-background-color: transparent; -fx-text-fill: " + subText + "; -fx-cursor: hand; -fx-padding: 8px;";
+        String openOnlyHover = "-fx-background-color: " + (isDarkMode ? "#27272a" : "#f4f4f5") + "; -fx-text-fill: " + mainText + "; -fx-background-radius: 8px; -fx-cursor: hand; -fx-padding: 8px;";
+        openOnlyBtn.setStyle(openOnlyNormal);
+        openOnlyBtn.setOnMouseEntered(e -> openOnlyBtn.setStyle(openOnlyHover));
+        openOnlyBtn.setOnMouseExited(e -> openOnlyBtn.setStyle(openOnlyNormal));
+
+        Timeline cleanupTimeline = new Timeline();
+        Timeline countdown = new Timeline();
+        dialogStage.setOnHidden(e -> {
+            cleanupTimeline.stop();
+            countdown.stop();
+        });
+
+        final Button mainBtn = loginBtn;
+
+        Runnable passwordStep = () -> {
+            countdown.stop();
+            copyToClipboard(password);
+            icon.setText("✅");
+            title.setText("Passwort kopiert!");
+            domainLabel.setText("Füge es jetzt im Browser ein (Strg+V).");
+            domainLabel.setStyle("-fx-text-fill: " + mainText + "; -fx-font-size: 14px;");
+            stepBar.setProgress(0);
+            root.getChildren().remove(stepBar);
+            mainBtn.setText("Fertig");
+            mainBtn.setOnAction(ev -> dialogStage.close());
+            openOnlyBtn.setVisible(false);
+            cleanupTimeline.stop();
+            cleanupTimeline.getKeyFrames().setAll(new KeyFrame(Duration.seconds(6), evt -> dialogStage.close()));
+            cleanupTimeline.setCycleCount(1);
+            cleanupTimeline.play();
+        };
+
+        mainBtn.setOnAction(e -> {
+            openUrl(url);
+            copyToClipboard(username);
+            icon.setText("①");
+            title.setText("Benutzername kopiert");
+            domainLabel.setText("Füge ihn jetzt im Login-Feld ein (Strg+V)...");
+            domainLabel.setStyle("-fx-text-fill: " + mainText + "; -fx-font-size: 14px;");
+            stepBar.setProgress(1.0);
+            root.getChildren().add(3, stepBar);
+
+            mainBtn.setText("② Passwort jetzt kopieren");
+            mainBtn.setOnAction(ev -> passwordStep.run());
+            openOnlyBtn.setText("Abbrechen");
+            openOnlyBtn.setOnAction(ev -> dialogStage.close());
+
+            final long start = System.currentTimeMillis();
+            final long duration = 8000L;
+            countdown.getKeyFrames().setAll(new KeyFrame(Duration.millis(100), ev -> {
+                long elapsed = System.currentTimeMillis() - start;
+                if (elapsed >= duration) {
+                    passwordStep.run();
+                } else {
+                    stepBar.setProgress(1.0 - (elapsed / (double) duration));
+                }
+            }));
+            countdown.setCycleCount(Animation.INDEFINITE);
+            countdown.play();
+        });
+
+        openOnlyBtn.setOnAction(e -> {
+            openUrl(url);
+            dialogStage.close();
+        });
+
+        root.getChildren().addAll(icon, title, domainLabel, userLabel, loginBtn, openOnlyBtn);
+
+        Scene scene = new Scene(root);
+        scene.setFill(Color.TRANSPARENT);
+        dialogStage.setScene(scene);
+        dialogStage.showAndWait();
+    }
+
+    private boolean openUrl(String url) {
+        String candidate = url == null ? "" : url.trim();
+        String lower = candidate.toLowerCase();
+        if (!lower.startsWith("https://") && !lower.startsWith("http://")) {
+            candidate = "https://" + candidate;
+            lower = candidate.toLowerCase();
+        }
+        if (!lower.startsWith("https://") && !lower.startsWith("http://")) return false;
+        try {
+            getHostServices().showDocument(candidate);
+            return true;
+        } catch (Exception e) { return false; }
+    }
+
+    private String extractDomain(String url) {
+        if (url == null) return "";
+        String u = url.trim().replaceFirst("(?i)^https?://", "").replaceFirst("(?i)^www\\.", "");
+        int slash = u.indexOf('/');
+        if (slash > 0) u = u.substring(0, slash);
+        return u;
     }
 
     private void initDatabase() {
@@ -1423,9 +2006,12 @@ public class Main extends Application {
             stmt.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL);");
             stmt.execute("CREATE TABLE IF NOT EXISTS vault_records (id INTEGER PRIMARY KEY AUTOINCREMENT, account_user TEXT NOT NULL, platform TEXT NOT NULL, username TEXT NOT NULL, password TEXT NOT NULL);");
 
-            // Migration für das URL-Feld (Ignorieren, falls die Spalte schon existiert)
             try {
                 stmt.execute("ALTER TABLE vault_records ADD COLUMN url TEXT DEFAULT ''");
+            } catch (SQLException ignored) {}
+
+            try {
+                stmt.execute("ALTER TABLE vault_records ADD COLUMN totp_secret TEXT DEFAULT ''");
             } catch (SQLException ignored) {}
 
         } catch (SQLException e) { System.out.println("DB Init Fehler: " + e.getMessage()); }
@@ -1502,15 +2088,16 @@ public class Main extends Application {
         } catch (SQLException ignored) {}
     }
 
-    private int saveToDatabase(String user, String platform, String url, String username, String password) {
+    private int saveToDatabase(String user, String platform, String url, String username, String password, String totpSecret) {
         if (sessionKeySpec == null || user == null) return -1;
-        String sql = "INSERT INTO vault_records(account_user, platform, url, username, password) VALUES(?,?,?,?,?)";
+        String sql = "INSERT INTO vault_records(account_user, platform, url, username, password, totp_secret) VALUES(?,?,?,?,?,?)";
         try (Connection conn = DriverManager.getConnection(DB_URL); PreparedStatement pstmt = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             pstmt.setString(1, user);
             pstmt.setString(2, encryptVaultData(platform));
             pstmt.setString(3, (url == null || url.isEmpty()) ? "" : encryptVaultData(url));
             pstmt.setString(4, encryptVaultData(username));
             pstmt.setString(5, encryptVaultData(password));
+            pstmt.setString(6, (totpSecret == null || totpSecret.isEmpty()) ? "" : encryptVaultData(totpSecret));
             pstmt.executeUpdate();
             ResultSet rs = pstmt.getGeneratedKeys();
             if (rs.next()) return rs.getInt(1);
@@ -1518,22 +2105,24 @@ public class Main extends Application {
         return -1;
     }
 
-    private void updateInDatabase(int id, String platform, String url, String username, String password) {
+    private void updateInDatabase(int id, String platform, String url, String username, String password, String totpSecret) {
         if (sessionKeySpec == null) return;
-        String sql = "UPDATE vault_records SET platform = ?, url = ?, username = ?, password = ? WHERE id = ?";
+        String sql = "UPDATE vault_records SET platform = ?, url = ?, username = ?, password = ?, totp_secret = ? WHERE id = ?";
         try (Connection conn = DriverManager.getConnection(DB_URL); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, encryptVaultData(platform));
             pstmt.setString(2, (url == null || url.isEmpty()) ? "" : encryptVaultData(url));
             pstmt.setString(3, encryptVaultData(username));
             pstmt.setString(4, encryptVaultData(password));
-            pstmt.setInt(5, id);
+            pstmt.setString(5, (totpSecret == null || totpSecret.isEmpty()) ? "" : encryptVaultData(totpSecret));
+            pstmt.setInt(6, id);
             pstmt.executeUpdate();
         } catch (SQLException ignored) {}
     }
 
     private void loadEntriesFromDatabase() {
         if (currentUser == null || currentUser.isEmpty() || sessionKeySpec == null) return;
-        String sql = "SELECT id, platform, url, username, password FROM vault_records WHERE account_user = ? ORDER BY id DESC";
+        stopAllTotpTimelines();
+        String sql = "SELECT id, platform, url, username, password, totp_secret FROM vault_records WHERE account_user = ? ORDER BY id DESC";
         try (Connection conn = DriverManager.getConnection(DB_URL); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, currentUser);
             ResultSet rs = pstmt.executeQuery();
@@ -1543,10 +2132,13 @@ public class Main extends Application {
                 String url = (rawUrl != null && !rawUrl.isEmpty()) ? decryptVaultData(rawUrl) : "";
                 String user = decryptVaultData(rs.getString("username"));
                 String pass = decryptVaultData(rs.getString("password"));
+                String rawTotp = rs.getString("totp_secret");
+                String totp = (rawTotp != null && !rawTotp.isEmpty()) ? decryptVaultData(rawTotp) : "";
 
-                entriesContainer.getChildren().add(createSwipeableCard(rs.getInt("id"), plat, url, user, pass));
+                entriesContainer.getChildren().add(createSwipeableCard(rs.getInt("id"), plat, url, user, pass, totp));
             }
         } catch (SQLException ignored) {}
+        refreshEmptyEntriesHint();
     }
 
     private void deleteFromDatabase(int id) {
@@ -1558,34 +2150,14 @@ public class Main extends Application {
 
     private String encryptVaultData(String plainText) {
         if (plainText == null || plainText.isEmpty()) return "";
-        try {
-            byte[] iv = new byte[16];
-            new SecureRandom().nextBytes(iv);
-            IvParameterSpec ivSpec = new IvParameterSpec(iv);
-            Cipher cipher = Cipher.getInstance(ALGORITHM);
-            cipher.init(Cipher.ENCRYPT_MODE, sessionKeySpec, ivSpec);
-            byte[] encryptedBytes = cipher.doFinal(plainText.getBytes(StandardCharsets.UTF_8));
-            byte[] combined = new byte[iv.length + encryptedBytes.length];
-            System.arraycopy(iv, 0, combined, 0, iv.length);
-            System.arraycopy(encryptedBytes, 0, combined, iv.length, encryptedBytes.length);
-            return Base64.getEncoder().encodeToString(combined);
-        } catch (Exception e) { return ""; }
+        String enc = encryptBytes(plainText.getBytes(StandardCharsets.UTF_8), sessionKeySpec);
+        return enc == null ? "" : enc;
     }
 
     private String decryptVaultData(String cipherText) {
-        if (cipherText == null || cipherText.isEmpty()) return "";
-        try {
-            byte[] combined = Base64.getDecoder().decode(cipherText);
-            byte[] iv = new byte[16];
-            System.arraycopy(combined, 0, iv, 0, iv.length);
-            IvParameterSpec ivSpec = new IvParameterSpec(iv);
-            int encryptedSize = combined.length - iv.length;
-            byte[] encryptedBytes = new byte[encryptedSize];
-            System.arraycopy(combined, iv.length, encryptedBytes, 0, encryptedSize);
-            Cipher cipher = Cipher.getInstance(ALGORITHM);
-            cipher.init(Cipher.DECRYPT_MODE, sessionKeySpec, ivSpec);
-            return new String(cipher.doFinal(encryptedBytes), StandardCharsets.UTF_8);
-        } catch (Exception e) { return ""; }
+        byte[] data = decryptBytes(cipherText, sessionKeySpec);
+        if (data == null) return "";
+        return new String(data, StandardCharsets.UTF_8);
     }
 
     public static void main(String[] args) {
