@@ -54,6 +54,23 @@ public class Main extends Application {
     private final VBox usersContainer = new VBox(10);
     private static final String DB_URL;
     private static final java.io.File APP_DIR;
+    private static Connection dbConn;
+
+    private static synchronized Connection db() {
+        try {
+            if (dbConn == null || dbConn.isClosed()) {
+                dbConn = DriverManager.getConnection(DB_URL);
+                try (Statement st = dbConn.createStatement()) {
+                    st.execute("PRAGMA journal_mode=WAL");
+                    st.execute("PRAGMA synchronous=NORMAL");
+                    st.execute("PRAGMA busy_timeout=5000");
+                }
+            }
+        } catch (SQLException e) {
+            return null;
+        }
+        return dbConn;
+    }
 
     static {
         String userHome = System.getProperty("user.home");
@@ -462,10 +479,12 @@ public class Main extends Application {
     }
 
     private void clearPersistentSession() {
-        try (Connection conn = DriverManager.getConnection(DB_URL);
-             PreparedStatement pstmt = conn.prepareStatement("DELETE FROM config WHERE key = 'auto_login'")) {
-            pstmt.executeUpdate();
-        } catch (SQLException ignored) {}
+        Connection conn = db();
+        if (conn != null) {
+            try (PreparedStatement pstmt = conn.prepareStatement("DELETE FROM config WHERE key = 'auto_login'")) {
+                pstmt.executeUpdate();
+            } catch (SQLException ignored) {}
+        }
         try {
             java.nio.file.Files.deleteIfExists(new java.io.File(APP_DIR, "session.key").toPath());
         } catch (Exception ignored) {}
@@ -1877,7 +1896,7 @@ public class Main extends Application {
             totpRow.getChildren().addAll(totpBadge, codeLabel, ring, secsLabel, copyCodeBtn);
             textContainer.getChildren().add(totpRow);
 
-            Timeline ticker = new Timeline(new KeyFrame(Duration.seconds(0.5), ev -> {
+            Timeline ticker = new Timeline(new KeyFrame(Duration.seconds(1), ev -> {
                 long epoch = System.currentTimeMillis() / 1000L;
                 long remain = 30 - (epoch % 30);
                 String code = TotpUtil.generate(totpSecret, epoch);
@@ -2137,8 +2156,9 @@ public class Main extends Application {
     }
 
     private void initDatabase() {
-        try (Connection conn = DriverManager.getConnection(DB_URL);
-             Statement stmt = conn.createStatement()) {
+        Connection conn = db();
+        if (conn == null) return;
+        try (Statement stmt = conn.createStatement()) {
             stmt.execute("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL);");
             stmt.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL);");
             stmt.execute("CREATE TABLE IF NOT EXISTS vault_records (id INTEGER PRIMARY KEY AUTOINCREMENT, account_user TEXT NOT NULL, platform TEXT NOT NULL, username TEXT NOT NULL, password TEXT NOT NULL);");
@@ -2157,7 +2177,9 @@ public class Main extends Application {
     private void setConfig(String key, String value) {
         if (key == null || value == null) return;
         String sql = "INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)";
-        try (Connection conn = DriverManager.getConnection(DB_URL); PreparedStatement pstmt = conn.prepareStatement(sql)) {
+        Connection conn = db();
+        if (conn == null) return;
+        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, key);
             pstmt.setString(2, value);
             pstmt.executeUpdate();
@@ -2167,7 +2189,9 @@ public class Main extends Application {
     private String getConfig(String key) {
         if (key == null) return null;
         String sql = "SELECT value FROM config WHERE key = ?";
-        try (Connection conn = DriverManager.getConnection(DB_URL); PreparedStatement pstmt = conn.prepareStatement(sql)) {
+        Connection conn = db();
+        if (conn == null) return null;
+        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, key);
             ResultSet rs = pstmt.executeQuery();
             if (rs.next()) return rs.getString("value");
@@ -2182,7 +2206,9 @@ public class Main extends Application {
     private boolean saveUserToDatabase(String name) {
         if (name == null || name.isEmpty()) return false;
         String sql = "INSERT INTO users(name) VALUES(?)";
-        try (Connection conn = DriverManager.getConnection(DB_URL); PreparedStatement pstmt = conn.prepareStatement(sql)) {
+        Connection conn = db();
+        if (conn == null) return false;
+        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, name);
             pstmt.executeUpdate();
             return true;
@@ -2192,7 +2218,9 @@ public class Main extends Application {
     private void loadUsersFromDatabase() {
         usersContainer.getChildren().clear();
         String sql = "SELECT name FROM users ORDER BY id ASC";
-        try (Connection conn = DriverManager.getConnection(DB_URL); Statement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery(sql)) {
+        Connection conn = db();
+        if (conn == null) { updateFormState(); return; }
+        try (Statement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery(sql)) {
             boolean holdsUsers = false;
             while (rs.next()) {
                 holdsUsers = true;
@@ -2212,7 +2240,9 @@ public class Main extends Application {
 
     private void deleteUserFromDatabase(String name) {
         if (name == null || name.isEmpty()) return;
-        try (Connection conn = DriverManager.getConnection(DB_URL)) {
+        Connection conn = db();
+        if (conn == null) return;
+        try {
             try (PreparedStatement pstmt = conn.prepareStatement("DELETE FROM users WHERE name = ?")) {
                 pstmt.setString(1, name); pstmt.executeUpdate();
             }
@@ -2228,7 +2258,9 @@ public class Main extends Application {
     private int saveToDatabase(String user, String platform, String url, String username, String password, String totpSecret) {
         if (sessionKeySpec == null || user == null) return -1;
         String sql = "INSERT INTO vault_records(account_user, platform, url, username, password, totp_secret) VALUES(?,?,?,?,?,?)";
-        try (Connection conn = DriverManager.getConnection(DB_URL); PreparedStatement pstmt = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+        Connection conn = db();
+        if (conn == null) return -1;
+        try (PreparedStatement pstmt = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             pstmt.setString(1, user);
             pstmt.setString(2, encryptVaultData(platform));
             pstmt.setString(3, (url == null || url.isEmpty()) ? "" : encryptVaultData(url));
@@ -2245,7 +2277,9 @@ public class Main extends Application {
     private void updateInDatabase(int id, String platform, String url, String username, String password, String totpSecret) {
         if (sessionKeySpec == null) return;
         String sql = "UPDATE vault_records SET platform = ?, url = ?, username = ?, password = ?, totp_secret = ? WHERE id = ?";
-        try (Connection conn = DriverManager.getConnection(DB_URL); PreparedStatement pstmt = conn.prepareStatement(sql)) {
+        Connection conn = db();
+        if (conn == null) return;
+        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, encryptVaultData(platform));
             pstmt.setString(2, (url == null || url.isEmpty()) ? "" : encryptVaultData(url));
             pstmt.setString(3, encryptVaultData(username));
@@ -2260,7 +2294,9 @@ public class Main extends Application {
         if (currentUser == null || currentUser.isEmpty() || sessionKeySpec == null) return;
         stopAllTotpTimelines();
         String sql = "SELECT id, platform, url, username, password, totp_secret FROM vault_records WHERE account_user = ? ORDER BY id DESC";
-        try (Connection conn = DriverManager.getConnection(DB_URL); PreparedStatement pstmt = conn.prepareStatement(sql)) {
+        Connection conn = db();
+        if (conn == null) return;
+        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, currentUser);
             ResultSet rs = pstmt.executeQuery();
             while (rs.next()) {
@@ -2280,7 +2316,9 @@ public class Main extends Application {
 
     private void deleteFromDatabase(int id) {
         String sql = "DELETE FROM vault_records WHERE id = ?";
-        try (Connection conn = DriverManager.getConnection(DB_URL); PreparedStatement pstmt = conn.prepareStatement(sql)) {
+        Connection conn = db();
+        if (conn == null) return;
+        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setInt(1, id); pstmt.executeUpdate();
         } catch (SQLException ignored) {}
     }
