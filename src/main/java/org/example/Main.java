@@ -1739,7 +1739,7 @@ public class Main extends Application {
         intro.setWrapText(true);
         intro.setStyle("-fx-text-fill: " + subText + "; -fx-font-size: 14px;");
 
-        Label steps = new Label(I18n.tr("So einfach gehts:\n1. Öffne die Website → Sicherheit → Zwei-Faktor-Aktivierung.\n2. Wähle \"Authenticator-App\", dann \"Kann nicht scannen?\" oder \"Schlüssel anzeigen\".\n3. Kopiere den angezeigten Schlüssel in das Feld hier.\n\nBeim Login fragt dich die Website dann nach dem aktuellen Code aus dieser App."));
+        Label steps = new Label(I18n.tr("So einfach gehts:\n1. Öffne die Website → Sicherheit → Zwei-Faktor-Aktivierung.\n2. Wähle \"Authenticator-App\", dann \"Kann nicht scannen?\" oder \"Schlüssel anzeigen\".\n3. Kopiere den angezeigten Schlüssel in das Feld hier.\n\nBeim Login fragt dich die Website danach nach dem aktuellen Code aus dieser App."));
         steps.setWrapText(true);
         steps.setStyle("-fx-text-fill: " + subText + "; -fx-font-size: 14px;");
 
