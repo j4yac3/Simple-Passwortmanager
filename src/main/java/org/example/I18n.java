@@ -9,6 +9,7 @@ public final class I18n {
     private static final Map<String, String> EN = new HashMap<>();
 
     static {
+        EN.put("JM Passwortmanager", "JM Password Manager");
         EN.put("Willkommen zurück", "Welcome back");
         EN.put("Bitte gib dein Master-Passwort ein, um den Tresor zu entsperren.", "Enter your master password to unlock your vault.");
         EN.put("Erstelle ein sicheres Master-Passwort, um deinen Tresor zu schützen.", "Create a strong master password to protect your vault.");

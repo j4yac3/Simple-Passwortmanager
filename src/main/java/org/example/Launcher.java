@@ -30,8 +30,11 @@ public class Launcher {
                 javax.swing.JOptionPane.showMessageDialog(null,
                         "Der Passwortmanager laeuft bereits, ist aber nicht sichtbar.\n\n"
                                 .concat("Loesung: Im Task-Manager alle Eintraege \"JM Passwortmanager\"\n")
-                                .concat("beenden und dann erneut starten."),
-                        "JM Passwortmanager", javax.swing.JOptionPane.WARNING_MESSAGE);
+                                .concat("beenden und dann erneut starten.\n\n")
+                                .concat("The password manager is already running but not visible.\n\n")
+                                .concat("Solution: In the Task Manager, end all \"JM Passwortmanager\"\n")
+                                .concat("entries and then start it again."),
+                        "JM Password Manager", javax.swing.JOptionPane.WARNING_MESSAGE);
                 return false;
             }
         } catch (Throwable t) {

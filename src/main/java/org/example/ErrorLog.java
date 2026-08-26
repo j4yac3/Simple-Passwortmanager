@@ -41,9 +41,9 @@ public final class ErrorLog {
         write(context, t);
         try {
             JOptionPane.showMessageDialog(null,
-                    "Es ist ein Fehler aufgetreten.\nDetails wurden gespeichert in:\n"
+                    "Es ist ein Fehler aufgetreten. / An error has occurred.\nDetails wurden gespeichert / Details have been saved to:\n"
                             .concat(logFile().getAbsolutePath()),
-                    "JM Passwortmanager", JOptionPane.ERROR_MESSAGE);
+                    "JM Password Manager", JOptionPane.ERROR_MESSAGE);
         } catch (Throwable ignored) {}
     }
 }

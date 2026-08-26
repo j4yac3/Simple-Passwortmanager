@@ -146,7 +146,7 @@ public class Main extends Application {
             }
         } catch (Exception ignored) {}
 
-        primaryStage.setTitle("JM Passwortmanager");
+        primaryStage.setTitle(I18n.tr("JM Passwortmanager"));
         primaryStage.setResizable(true);
         primaryStage.setMinWidth(900);
         primaryStage.setMinHeight(600);
@@ -188,6 +188,7 @@ public class Main extends Application {
     private void toggleLanguage() {
         I18n.setLanguage(I18n.isEnglish() ? "de" : "en");
         setConfig("language", I18n.getLanguage());
+        if (primaryStage != null) primaryStage.setTitle(I18n.tr("JM Passwortmanager"));
         Scene scene = primaryStage != null ? primaryStage.getScene() : null;
         if (scene != null && scene.getRoot() == mainLayout) {
             buildAndShowMainUI();
@@ -197,7 +198,7 @@ public class Main extends Application {
     }
 
     private void showSetupScreen() {
-        VBox root = createAuthLayout("JM Passwortmanager", I18n.tr("Erstelle ein sicheres Master-Passwort, um deinen Tresor zu schützen."));
+        VBox root = createAuthLayout(I18n.tr("JM Passwortmanager"), I18n.tr("Erstelle ein sicheres Master-Passwort, um deinen Tresor zu schützen."));
 
         PasswordField passInput = new PasswordField();
         passInput.setPromptText(I18n.tr("Master-Passwort"));
@@ -776,7 +777,7 @@ public class Main extends Application {
             String pass = passwordInput.getText() != null ? passwordInput.getText().trim() : "";
 
             if (!totp.isEmpty() && !TotpUtil.isPlausible(totp)) {
-                showAlert("Das 2FA-Secret ist ungültig.\nErlaubt ist ein Base32-Secret oder ein otpauth://-Link.");
+                showAlert(I18n.tr("Das 2FA-Secret ist ungültig.\nErlaubt ist ein Base32-Secret oder ein otpauth://-Link."));
                 totpInput.requestFocus();
                 return;
             }
@@ -1606,7 +1607,7 @@ public class Main extends Application {
             String tf = TotpUtil.normalize(totpField.getText());
 
             if (!tf.isEmpty() && !TotpUtil.isPlausible(tf)) {
-                showAlert("Das 2FA-Secret ist ungültig.\nErlaubt ist ein Base32-Secret oder ein otpauth://-Link.");
+                showAlert(I18n.tr("Das 2FA-Secret ist ungültig.\nErlaubt ist ein Base32-Secret oder ein otpauth://-Link."));
                 totpField.requestFocus();
                 return;
             }
