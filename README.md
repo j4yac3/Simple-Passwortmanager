@@ -97,7 +97,7 @@ Everything is stored locally at `%USERPROFILE%\.jm-passwortmanager\` (Linux/macO
 
 ### Internal
 * Refactored auth screen layout to use `StackPane` overlay for absolute positioning of the language button.
-* Added external CSS stylesheets (`scrollbar.css`, `scrollbar-light.css`) for scrollbar theming.
+* Scrollbar theming is applied programmatically (theme-aware, applied after CSS layout passes).
 * README rewritten in English.
 
 ---

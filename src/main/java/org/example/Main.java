@@ -15,6 +15,7 @@ import javafx.scene.control.CheckBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.ProgressBar;
+import javafx.scene.control.ScrollBar;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Slider;
 import javafx.scene.control.TextField;
@@ -89,6 +90,8 @@ public class Main extends Application {
     private SecretKeySpec sessionKeySpec;
     private Stage primaryStage;
     private BorderPane mainLayout;
+    private ScrollPane entriesScrollPane;
+    private ScrollPane sidebarScrollPane;
     private Timeline autoLockTimer;
     private long lastActivityMillis;
     private Button langBtn;
@@ -673,6 +676,7 @@ public class Main extends Application {
         sidebarHeader.getChildren().addAll(menuTitle, headerSpacer, addUserBtn);
 
         ScrollPane userScrollPane = new ScrollPane(usersContainer);
+        sidebarScrollPane = userScrollPane;
         userScrollPane.setFitToWidth(true);
         userScrollPane.setStyle("-fx-background: transparent; -fx-background-color: transparent; -fx-control-inner-background: transparent; -fx-vbar-policy: as-needed; -fx-hbar-policy: never;");
         sidebar.getChildren().addAll(sidebarHeader, userScrollPane);
@@ -805,6 +809,7 @@ public class Main extends Application {
         separator.setPrefHeight(1);
 
         ScrollPane scrollPane = new ScrollPane(entriesContainer);
+        entriesScrollPane = scrollPane;
         scrollPane.setFitToWidth(true);
         VBox.setVgrow(scrollPane, Priority.ALWAYS);
         scrollPane.setStyle("-fx-background: transparent; -fx-background-color: transparent; -fx-control-inner-background: transparent; -fx-vbar-policy: as-needed; -fx-hbar-policy: never;");
@@ -824,7 +829,34 @@ public class Main extends Application {
         primaryStage.setScene(mainScene);
         primaryStage.show();
         primaryStage.toFront();
+        Platform.runLater(() -> {
+            styleScrollbars(entriesScrollPane);
+            styleScrollbars(sidebarScrollPane);
+        });
         startAutoLockTimer();
+    }
+
+    private void styleScrollbars(ScrollPane sp) {
+        if (sp == null) return;
+        sp.applyCss();
+        sp.layout();
+        for (Node n : sp.lookupAll(".scroll-bar")) {
+            n.setStyle("-fx-background-color: transparent;");
+            if (n instanceof ScrollBar bar) {
+                bar.setPrefSize(8, 8);
+            }
+        }
+        for (Node n : sp.lookupAll(".increment-button")) n.setVisible(false);
+        for (Node n : sp.lookupAll(".decrement-button")) n.setVisible(false);
+        for (Node n : sp.lookupAll(".increment-arrow")) n.setVisible(false);
+        for (Node n : sp.lookupAll(".decrement-arrow")) n.setVisible(false);
+        for (Node n : sp.lookupAll(".track")) {
+            n.setStyle("-fx-background-color: transparent;");
+        }
+        String thumbColor = isDarkMode ? "#3f3f46" : "#bfc0c6";
+        for (Node n : sp.lookupAll(".thumb")) {
+            n.setStyle("-fx-background-color: " + thumbColor + "; -fx-background-radius: 4px; -fx-background-insets: 2 3 2 3;");
+        }
     }
 
     private void applyTheme() {
@@ -899,6 +931,10 @@ public class Main extends Application {
         updateFormState();
         updateUserCardsVisualsOnly();
         updateEntryCardsVisualsOnly();
+        Platform.runLater(() -> {
+            styleScrollbars(entriesScrollPane);
+            styleScrollbars(sidebarScrollPane);
+        });
     }
 
     private void updateFormState() {
@@ -1604,6 +1640,7 @@ public class Main extends Application {
         scene.setFill(Color.TRANSPARENT);
         dialogStage.setScene(scene);
 
+        Platform.runLater(() -> styleScrollbars(scrollPane));
         Platform.runLater(platField::requestFocus);
         dialogStage.showAndWait();
     }
