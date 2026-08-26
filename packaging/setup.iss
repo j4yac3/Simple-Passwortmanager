@@ -21,8 +21,13 @@ OutputDir=.
 OutputBaseFilename=JM-Password-Manager-1.1.0-setup
 Compression=lzma2/max
 SolidCompression=yes
-InfoBeforeFile=INFO-BEFORE.txt
+WizardInfoBeforeFile=INFO-BEFORE.txt
 LicenseFile=EULA.txt
+; To remove SmartScreen warnings, buy a code signing certificate and:
+; 1) uncomment the two lines below
+; 2) configure a Sign Tool named "signtool" in Inno Setup (Tools -> Configure Sign Tools)
+; SignTool=signtool
+; SignedUninstaller=yes
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
