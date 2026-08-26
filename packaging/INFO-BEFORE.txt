@@ -1,0 +1,25 @@
+Welcome to the JM Password Manager Setup!
+
+WHAT YOU SHOULD KNOW BEFORE CONTINUING:
+
+* 100% LOCAL: All passwords are stored encrypted (AES-256-GCM) on this
+  computer only. No cloud, no accounts, no tracking.
+
+* MASTER PASSWORD: You will create a master password (minimum 12
+  characters) that protects your entire vault. There is no password
+  recovery without your recovery code.
+
+* RECOVERY CODE: After the first start, the app shows you a 28-character
+  recovery code. Write it down and keep it safe - it is the ONLY way to
+  reset a forgotten master password.
+
+* AUTO-LOCK: For your safety, the vault locks itself automatically after
+  5 minutes of inactivity.
+
+* CLIPBOARD: Copied passwords are removed from the clipboard
+  automatically after 15 seconds.
+
+* YOUR DATA LIVES HERE:  %USERPROFILE%\.jm-passwortmanager\vault.db
+  Uninstalling this program will NOT delete your password database.
+
+Click Next to continue.

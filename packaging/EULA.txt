@@ -1,0 +1,37 @@
+JM PASSWORD MANAGER - END USER LICENSE TERMS
+Copyright (c) JM. All rights reserved.
+
+IMPORTANT - PLEASE READ CAREFULLY BEFORE INSTALLING.
+
+By clicking "I accept the terms in the License Agreement" you agree to the
+following terms:
+
+1. NATURE OF THE SOFTWARE
+   This software is provided free of charge, "AS IS", without warranty of
+   any kind, express or implied, including but not limited to the
+   warranties of merchantability and fitness for a particular purpose.
+
+2. LOCAL STORAGE - NO CLOUD
+   All passwords are stored exclusively and encrypted (AES-256-GCM) on
+   this computer. No data is transmitted to any server or cloud service.
+
+3. YOUR RESPONSIBILITY
+   Keep your master password (min. 12 characters) and your 28-character
+   recovery code in a safe place. If both are lost, access to your data
+   is NOT possible - by design. Create regular backups of your data.
+
+4. LIMITATION OF LIABILITY
+   In no event shall the author be liable for any data loss, damages or
+   consequential damages arising out of the use or inability to use this
+   software.
+
+5. PRIVACY
+   The software contains no telemetry, no tracking and no advertising.
+
+6. TERMINATION
+   You may uninstall and stop using this software at any time. The
+   uninstaller leaves your encrypted database untouched unless you
+   delete it yourself.
+
+If you do not agree to these terms, click "I do not accept" and the
+installation will be cancelled.
