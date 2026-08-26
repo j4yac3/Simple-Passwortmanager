@@ -822,8 +822,6 @@ public class Main extends Application {
         applyTheme();
 
         Scene mainScene = new Scene(mainLayout, 1280, 720);
-        String scrollbarCss = isDarkMode ? "/scrollbar.css" : "/scrollbar-light.css";
-        mainScene.getStylesheets().add(getClass().getResource(scrollbarCss).toExternalForm());
         mainScene.addEventFilter(MouseEvent.ANY, e -> lastActivityMillis = System.currentTimeMillis());
         mainScene.addEventFilter(KeyEvent.ANY, e -> lastActivityMillis = System.currentTimeMillis());
         primaryStage.setScene(mainScene);
@@ -860,12 +858,6 @@ public class Main extends Application {
     }
 
     private void applyTheme() {
-        Scene scene = primaryStage != null ? primaryStage.getScene() : null;
-        if (scene != null) {
-            scene.getStylesheets().clear();
-            String scrollbarCss = isDarkMode ? "/scrollbar.css" : "/scrollbar-light.css";
-            scene.getStylesheets().add(getClass().getResource(scrollbarCss).toExternalForm());
-        }
         if (isDarkMode) {
             mainLayout.setStyle("-fx-background-color: #09090b;");
             sidebar.setStyle("-fx-background-color: #121214; -fx-border-color: #27272a; -fx-border-width: 0 1px 0 0;");
